@@ -33,7 +33,8 @@ class PlannedExercise {
 class PlannedSet {
   id: String
   setNumber: Int
-  targetLoadPct: Double?
+  targetLoadPctMin: Double?
+  targetLoadPctMax: Double?
   loadPercentBasis: String?
   repsMin: Int?
   repsMax: Int?
@@ -113,34 +114,47 @@ class ExerciseExecution {
   pipelineVersion: Int
   analyzerVersion: Int
   metricVersion: Int
+  ruleSetVersion: Int
   cuePolicyVersion: Int
   calibrationProfileId: UUID?
   calibrationVersion: Int?
+}
+
+class ExerciseParameterSnapshot {
+  key: String
+  numericValue: Double?
+  textValue: String?
+  unit: String?
 }
 
 class ExerciseSet {
   id: UUID
   plannedSetId: String?
   setNumber: Int
-  loadKg: Double?
-  targetReps: Int?
   startedAt: Instant
+  startedAtElapsedNanos: Long
   endedAt: Instant?
   status: String
   telemetryExpiresAt: Instant
 }
 
+class ResistanceSnapshot {
+  value: Double?
+  unit: String?
+  mode: String
+}
+
 class Rep {
   id: UUID
   repNumber: Int
-  startedAtElapsedNanos: Long
-  endedAtElapsedNanos: Long
+  startedOffsetNanos: Long
+  endedOffsetNanos: Long
   completionState: String
 }
 
 class PoseObservation <<value object>> {
   observationSchemaVersion: Int
-  elapsedRealtimeNanos: Long
+  offsetNanosFromSetStart: Long
   imageLandmarks: PoseLandmark[]
   worldLandmarks: PoseLandmark[]?
   rotationDegrees: Int
@@ -153,14 +167,14 @@ class PoseObservationChunk {
   id: UUID
   observationSchemaVersion: Int
   codecVersion: Int
-  startElapsedNanos: Long
-  endElapsedNanos: Long
+  startOffsetNanos: Long
+  endOffsetNanos: Long
   sampleCount: Int
   payload: ByteArray
 }
 
 class TrackingEvent {
-  elapsedRealtimeNanos: Long
+  offsetNanosFromSetStart: Long
   type: String
   severity: Severity
   details: String?
@@ -177,14 +191,16 @@ class RepMetric {
 class FormEvent {
   id: UUID
   repId: UUID?
+  scope: String
   ruleId: String
   ruleVersion: Int
+  eventRevision: Long
   status: String
   severity: Severity
   confidence: Double
-  startedAtElapsedNanos: Long
-  lastUpdatedAtElapsedNanos: Long
-  endedAtElapsedNanos: Long?
+  startedOffsetNanos: Long
+  lastUpdatedOffsetNanos: Long
+  endedOffsetNanos: Long?
 }
 
 class FormEvidence {
@@ -198,7 +214,7 @@ class FormEvidence {
 
 class CueDelivery {
   id: UUID
-  deliveredAtElapsedNanos: Long
+  deliveredOffsetNanos: Long
   channel: String
   message: String
 }
@@ -217,6 +233,12 @@ class TraceChannel {
   values: Float[]
 }
 
+class RepFinalizationBundle <<command>> {
+  commandSequence: Long
+  repId: UUID
+  completionState: String
+}
+
 UserProfile "1" -- "0..*" TrainingPlan
 TrainingPlan "1" *-- "1..*" TrainingDay
 TrainingDay "1" *-- "1..*" PlannedExercise
@@ -233,7 +255,9 @@ WorkoutSession "0..*" --> "0..1" DailyHealthSummary : optional health context >
 WorkoutSession "1" *-- "0..*" ExerciseExecution
 ExerciseExecution "0..*" --> "1" ExerciseDefinition : executes >
 ExerciseExecution "0..*" --> "0..1" CalibrationProfile : used calibration >
+ExerciseExecution "1" *-- "0..*" ExerciseParameterSnapshot
 ExerciseExecution "1" *-- "0..*" ExerciseSet
+ExerciseSet "1" *-- "0..1" ResistanceSnapshot
 ExerciseSet "1" *-- "0..*" PoseObservationChunk
 PoseObservationChunk ..> PoseObservation : decodes to >
 ExerciseSet "1" *-- "0..*" TrackingEvent
@@ -245,6 +269,10 @@ FormEvent "1" *-- "1..*" FormEvidence
 FormEvent "1" *-- "0..*" CueDelivery
 Rep "1" *-- "0..1" CompactRepTrace
 CompactRepTrace "1" *-- "1..*" TraceChannel
+RepFinalizationBundle ..> Rep
+RepFinalizationBundle ..> RepMetric
+RepFinalizationBundle ..> CompactRepTrace
+RepFinalizationBundle ..> FormEvent
 
 note right of TrainingPlan
 A published plan version is immutable once referenced by a workout.
@@ -252,54 +280,47 @@ Editing the plan creates a new version rather than mutating history.
 end note
 
 note right of PlannedSet
-targetLoadPct is not meaningful without a basis.
-Store loadPercentBasis when known; leave it null when the
-source plan does not define the denominator rather than guessing.
+Load percentages may be ranges (for example 85-90%).
+loadPercentBasis remains null when the source does not define the denominator.
+Never infer an undefined basis.
 end note
 
 note right of CalibrationProfile
 Calibration profiles are immutable/versioned once used.
-ExerciseExecution snapshots both calibrationProfileId and version.
+ExerciseExecution snapshots profile id + version.
 end note
 
 note right of ExerciseExecution
-pipelineVersion covers shared deterministic normalization/smoothing/
-quality-gate semantics. Exercise-specific analyzer/metric/cue-policy
-versions are also snapshotted.
+pipelineVersion covers shared normalization/smoothing/quality-gate semantics.
+Exercise-specific analyzer, metric, rule-set and cue-policy versions are snapshotted.
+ExerciseParameterSnapshot captures configuration such as benchAngleDeg.
 end note
 
 note right of ExerciseSet
-telemetryExpiresAt is NON-NULL from set creation.
-Initialize fail-safe expiry at startedAt + 7 days.
-On normal set close, update it to endedAt + 7 days.
-A crash therefore cannot leave short-lived data with no expiry.
+startedAt provides wall-clock history; startedAtElapsedNanos is the runtime
+monotonic origin used to convert durable event times to offsets.
+telemetryExpiresAt is NON-NULL from set creation: startedAt + 7 days,
+then updated to endedAt + 7 days on normal close.
 end note
 
-note right of WorkoutSession
-WorkoutSession / ExerciseExecution / ExerciseSet use explicit status.
-Normal close transitions ACTIVE -> COMPLETED.
-Startup recovery transitions stale ACTIVE records -> INTERRUPTED.
+note right of ResistanceSnapshot
+Resistance semantics are explicit rather than a bare load number.
+Typical modes: PER_HAND, TOTAL_EXTERNAL, MACHINE_STACK, ASSISTANCE, BODYWEIGHT.
+Canonical unit conversion is a spec concern; original semantics are preserved.
 end note
 
 note right of PoseObservationChunk
 Do not persist one Room row per analyzed frame.
-Sample short-lived PoseObservation values at a bounded persistence rate,
-encode multiple timestamped observations into versioned binary chunks,
-and retain chunks only until the owning set's telemetryExpiresAt.
-Exact sample rate/chunk size/codec belong in the implementation spec.
-end note
-
-note right of DailyHealthSummary
-aggregationVersion + computedAt preserve summary meaning if
-Health Connect dedupe/aggregation logic changes or late data arrives.
+Sample ordered pose observations at a bounded persistence rate,
+encode multiple observations into versioned chunks, and expire them with the set.
+No camera image bytes are stored in PoseObservation.
 end note
 
 note right of FormEvent
 One continuous detected issue is one stateful episode, not one row/frame.
-Typical lifecycle: PENDING in memory -> ACTIVE when persistence threshold
-is met -> FINALIZED when cleared, rep/set ends, or analyzer resets.
-Persist activation/finalization using the same FormEvent id.
-On crash, durable ACTIVE events become INTERRUPTED during startup recovery.
+scope=REP requires repId and finalizes at the rep boundary.
+scope=SET may span reps and normally has repId null.
+eventRevision increases monotonically so stale upserts cannot overwrite newer state.
 CueDelivery remains a separate child and may be absent.
 end note
 
@@ -307,6 +328,11 @@ note right of CompactRepTrace
 Generic long-term compact reinterpretation artifact.
 schemaId + TraceChannel[] allow exercise-specific signals.
 It does not claim full-fidelity replay after short-lived observations expire.
+end note
+
+note right of RepFinalizationBundle
+Rep + RepMetric[] + optional CompactRepTrace + rep-scoped FormEvent finalizations
+are one priority command and must commit atomically in one Room transaction.
 end note
 
 @enduml
