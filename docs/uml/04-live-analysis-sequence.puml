@@ -38,10 +38,20 @@ loop each camera frame
     Analyzer -> Analyzer : update rep state
     Analyzer -> Metrics : calculate metrics
     Analyzer -> Rules : evaluate metrics / phase / history
-    Rules --> Cue : candidate FormEvents
-    Cue --> UI : one prioritized cue
+    Rules --> Cue : persisted FormEvent + FormEvidence[]
+    Rules -> DurableQ : FormEvent + structured evidence
+
+    alt CueArbitrator selects feedback
+      Cue --> UI : one prioritized visual cue
+      opt offline TTS voice available
+        Cue --> UI : speak same short cue via local TTS
+      end
+      Cue -> DurableQ : CueDelivery
+    else issue suppressed by priority/cooldown
+      Cue --> Cue : no delivery record
+    end
+
     Analyzer -> TelemetryQ : raw telemetry
-    Rules -> DurableQ : FormEvents + evidence
     alt rep completed
       Analyzer --> UI : increment rep count
       Analyzer -> DurableQ : rep summary + CompactRepTrace
@@ -63,19 +73,18 @@ end
 
 Shawn -> UI : Stop Set
 UI -> Camera : stop stream
-UI -> DurableQ : finalize set summary
+UI -> DurableQ : finalize set + telemetryExpiresAt
 
 note over TelemetryQ,DurableQ
 Storage is outside the coaching critical path.
-Telemetry uses a bounded best-effort queue.
-Durable rep summaries, metrics and FormEvents use
-a separate priority queue and are persisted first.
+Telemetry is best-effort; durable summaries, evidence and cue deliveries
+use a separate priority queue and are persisted first.
 end note
 
-note over Gate,Cue
-Quality/confidence/persistence/cooldown protect against noisy cues.
-TTS uses an offline-capable installed voice only;
-otherwise feedback remains visual.
+note over Rules,Cue
+Detection and feedback delivery are different facts.
+Persist structured FormEvidence for detected issues.
+Persist CueDelivery only when a cue is actually shown/spoken.
 end note
 
 @enduml
