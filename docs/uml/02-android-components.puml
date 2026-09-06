@@ -1,0 +1,48 @@
+@startuml
+!theme plain
+skinparam shadowing false
+skinparam componentStyle rectangle
+
+package "gym-buddy Android App" {
+  [Compose UI] as UI
+  [Camera Controller\n(CameraX)] as Camera
+  [Pose Perception\n(MediaPipe)] as Pose
+  [Signal Processor] as Signal
+  [Exercise Analyzer\nIncline DB Press first] as Analyzer
+  [Rep State Machine] as RepSM
+  [Biomechanics Metrics] as Metrics
+  [Deterministic Rule Engine] as Rules
+  [Cue Engine\nOverlay + TTS] as Cue
+  [Workout Repository] as Repo
+  [Health Connect Adapter] as Health
+  [Room Database] as Room
+}
+
+UI --> Camera : start/stop session
+Camera --> Pose : frames
+Pose --> Signal : pose landmarks
+Signal --> Analyzer : smoothed landmarks
+Analyzer --> RepSM : temporal movement state
+Analyzer --> Metrics : joint / trajectory features
+RepSM --> Metrics : phase context
+Metrics --> Rules : derived metrics
+Rules --> Cue : form events
+Cue --> UI : realtime overlay
+Cue --> [Android TextToSpeech]
+Analyzer --> Repo : pose samples / reps / metrics
+Rules --> Repo : form events
+Health --> Repo : daily health context
+Repo --> Room
+UI --> Repo : history / session state
+
+note bottom of Pose
+ML ends here.
+Everything downstream is normal code.
+end note
+
+note bottom of Rules
+Rules must be deterministic,
+versioned, testable, and explainable.
+end note
+
+@enduml
