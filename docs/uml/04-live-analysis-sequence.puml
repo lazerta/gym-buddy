@@ -9,6 +9,7 @@ participant "WorkoutSessionController" as Session
 participant "CameraX" as Camera
 participant "LatestFrameScheduler" as Scheduler
 participant "MediaPipe Pose" as Pose
+participant "TelemetrySamplerChunker" as TelemetryStage
 participant "CoordinateNormalizer" as Normalize
 participant "SignalProcessor" as Signal
 participant "TrackingQualityGate" as Gate
@@ -32,7 +33,11 @@ Session -> Camera : start accepting frames
 loop each camera frame
   Camera -> Scheduler : frame + monotonic timestamp
   Scheduler -> Pose : newest eligible frame
-  Pose -> TelemetryQ : best-effort PoseObservation\nlandmarks + transform metadata only
+  Pose -> TelemetryStage : PoseObservation\nlandmarks + transform metadata only
+  TelemetryStage -> TelemetryStage : bounded-rate sample + chunk
+  opt chunk ready
+    TelemetryStage -> TelemetryQ : PoseObservationChunk
+  end
   Pose --> Normalize : same pose output
   Normalize --> Signal : canonical coordinates
   Signal --> Gate : MovementFrame
@@ -80,7 +85,7 @@ loop async priority persistence
 end
 loop async short-lived telemetry persistence
   TelemetryQ -> Writer : next best-effort batch
-  Writer -> Repo : persist PoseObservation / TrackingEvent
+  Writer -> Repo : persist PoseObservationChunk / TrackingEvent
   Repo -> DB : transaction
 end
 
@@ -89,6 +94,8 @@ UI -> Session : stopSet()
 Session -> Camera : stop accepting new frames
 Session -> Scheduler : await in-flight analysis quiescence
 Scheduler --> Session : pipeline idle
+Session -> TelemetryStage : flush partial short-lived chunk best-effort
+TelemetryStage -> TelemetryQ : optional final PoseObservationChunk
 Session -> Analyzer : finalizeSet()\nclose partial/in-progress rep state
 Analyzer -> PriorityQ : partial/aborted rep summary if applicable
 Session -> Rules : finalizeSet()\nclose all active FormEvent episodes
@@ -101,10 +108,10 @@ Writer --> Session : SetCloseBarrier committed
 Session --> UI : set saved / closed
 UI --> Shawn : saved
 
-note over Pose,TelemetryQ
-Recent replay starts from perception output before normalization/smoothing.
-No camera image bytes are stored. PoseObservation is best-effort,
-so storage pressure may create gaps; do not promise perfect replay.
+note over Pose,TelemetryStage
+Realtime inference rate and persistence sampling rate are independent.
+Pose data is sampled/chunked before Room so storage does not scale as
+one database row per analyzed frame.
 end note
 
 note over Rules,PriorityQ
@@ -117,6 +124,7 @@ note over Session,Scheduler
 SetCloseBarrier is enqueued only after the analysis pipeline is idle
 and analyzer/rule in-memory state has been finalized.
 No late high-value record may appear behind the close barrier.
+Short-lived telemetry remains best-effort and does not gate set close.
 end note
 
 note over TelemetryQ,PriorityQ
@@ -129,7 +137,8 @@ end note
 note over Writer,Session
 Normal Stop Set has an explicit durability barrier for higher-value data.
 A process crash may still lose uncommitted current data; on next startup,
-stale ACTIVE workout/execution/set records are recovered as INTERRUPTED.
+stale ACTIVE workout/execution/set/form-event records are recovered
+as INTERRUPTED.
 end note
 
 @enduml
