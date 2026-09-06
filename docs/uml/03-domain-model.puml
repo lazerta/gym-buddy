@@ -1,0 +1,100 @@
+@startuml
+!theme plain
+skinparam shadowing false
+hide methods
+
+class UserProfile {
+  heightCm: Double
+  preferredUnits: String
+}
+
+class DailyContext {
+  date: LocalDate
+  bodyWeightKg: Double?
+  bodyFatPct: Double?
+  sleepMinutes: Int?
+  deepSleepMinutes: Int?
+  restingHeartRateBpm: Int?
+  steps: Int?
+  caloriesKcal: Int?
+  proteinG: Double?
+  carbsG: Double?
+  fatG: Double?
+  preWorkoutCarbsG: Double?
+  waterMl: Int?
+  sodiumMg: Int?
+}
+
+class WorkoutSession {
+  id: UUID
+  startedAt: Instant
+  endedAt: Instant?
+  exerciseType: ExerciseType
+}
+
+class ExerciseSet {
+  id: UUID
+  setNumber: Int
+  load: Double?
+  targetReps: Int?
+}
+
+class Rep {
+  id: UUID
+  repNumber: Int
+  startedAtMs: Long
+  endedAtMs: Long
+  qualityScore: Double?
+}
+
+class PoseSample {
+  timestampMs: Long
+  phase: RepPhase
+  landmarks: PoseLandmark[]
+}
+
+class RepMetric {
+  metricType: MetricType
+  value: Double
+  unit: String
+  confidence: Double
+}
+
+class FormEvent {
+  ruleId: String
+  ruleVersion: Int
+  severity: Severity
+  confidence: Double
+  startedAtMs: Long
+  endedAtMs: Long
+  cue: String
+}
+
+class HealthSample {
+  source: String
+  type: HealthMetricType
+  value: Double
+  timestamp: Instant
+}
+
+UserProfile "1" -- "0..*" WorkoutSession
+DailyContext "1" -- "0..*" WorkoutSession : contextualizes >
+WorkoutSession "1" *-- "1..*" ExerciseSet
+ExerciseSet "1" *-- "1..*" Rep
+Rep "1" *-- "0..*" PoseSample
+Rep "1" *-- "0..*" RepMetric
+Rep "1" *-- "0..*" FormEvent
+DailyContext "1" *-- "0..*" HealthSample
+
+note right of PoseSample
+Raw video is not required to persist.
+Pose telemetry is the durable movement record.
+end note
+
+note right of FormEvent
+Never store only a score.
+Preserve rule id, version,
+measurements and confidence.
+end note
+
+@enduml
