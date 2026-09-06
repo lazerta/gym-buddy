@@ -91,6 +91,7 @@ class WorkoutSession {
   id: UUID
   startedAt: Instant
   endedAt: Instant?
+  status: String
   trainingPlanId: String?
   trainingPlanVersion: Int?
   appBuild: String
@@ -104,6 +105,7 @@ class ExerciseExecution {
   order: Int
   startedAt: Instant
   endedAt: Instant?
+  status: String
   analyzerVersion: Int
   metricVersion: Int
   calibrationProfileId: UUID?
@@ -118,6 +120,7 @@ class ExerciseSet {
   targetReps: Int?
   startedAt: Instant
   endedAt: Instant?
+  status: String
   telemetryExpiresAt: Instant
 }
 
@@ -239,6 +242,12 @@ telemetryExpiresAt is NON-NULL from set creation.
 Initialize fail-safe expiry at startedAt + 7 days.
 On normal set close, update it to endedAt + 7 days.
 A crash therefore cannot leave short-lived data with no expiry.
+end note
+
+note right of WorkoutSession
+WorkoutSession / ExerciseExecution / ExerciseSet use explicit status.
+Normal close transitions ACTIVE -> COMPLETED.
+Startup recovery transitions stale ACTIVE records -> INTERRUPTED.
 end note
 
 note right of PoseObservation
