@@ -17,7 +17,7 @@ package "gym-buddy Android App" {
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
   [Telemetry Ring Buffer\nbounded / best-effort] as TelemetryBuffer
-  [Durable Event Queue\nreserved priority lane] as DurableQueue
+  [Priority Persistence Queue\nbounded / reserved capacity] as PriorityQueue
   [Batch Writer\noff realtime path] as BatchWriter
   [Workout Repository] as Repo
   [Health Connect Adapter] as Health
@@ -36,17 +36,17 @@ Quality --> Analyzer : valid frames only
 Quality --> Overlay : tracking/calibration guidance
 Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + recent history
-Rules --> CuePolicy : persisted FormEvent + structured FormEvidence
+Rules --> CuePolicy : FormEvent + structured FormEvidence
 CuePolicy --> Overlay : highest-priority actionable cue
 CuePolicy --> [Android TextToSpeech] : offline voice only; otherwise visual fallback
 
 Analyzer --> TelemetryBuffer : raw telemetry / transient tracking data
-Analyzer --> DurableQueue : completed rep summary + CompactRepTrace
-Metrics --> DurableQueue : durable final rep metrics
-Rules --> DurableQueue : FormEvent + FormEvidence[]
-CuePolicy --> DurableQueue : CueDelivery when a cue is actually delivered
+Analyzer --> PriorityQueue : completed rep summary + CompactRepTrace
+Metrics --> PriorityQueue : final rep metrics
+Rules --> PriorityQueue : FormEvent + FormEvidence[]
+CuePolicy --> PriorityQueue : CueDelivery when actually delivered
 TelemetryBuffer --> BatchWriter : best-effort batches
-DurableQueue --> BatchWriter : priority durable batches
+PriorityQueue --> BatchWriter : priority batches first
 BatchWriter --> Repo : persist transaction
 Repo --> Room
 
@@ -57,41 +57,35 @@ Retention --> [App-private no-backup files] : delete expired debug media
 UI --> Repo : history / workout state
 
 note bottom of Pose
-ML ends here.
-Everything downstream is deterministic code.
-The pose model is bundled; no runtime network download.
+ML ends here. Everything downstream is deterministic code.
+Pose model is bundled; no runtime network download.
 end note
 
 note bottom of Scheduler
 Do not queue stale camera frames.
-Prefer latest-frame processing so latency stays bounded.
-end note
-
-note bottom of Quality
-If required joints are missing, confidence is low,
-or camera setup is invalid: DO NOT ANALYZE / DO NOT CUE.
+Prefer newest eligible frames so latency stays bounded.
 end note
 
 note bottom of TelemetryBuffer
 Raw/high-frequency data is best-effort.
-Never let storage pressure block coaching.
+Storage pressure must never block coaching.
 end note
 
-note bottom of DurableQueue
+note bottom of PriorityQueue
+This is an in-memory PRIORITY queue, not durable storage.
+Durability begins only after Room commit.
 Reserve capacity for rep summaries, compact traces,
-metrics, structured rule evidence and CueDelivery records.
-Drain before raw telemetry.
+metrics, structured evidence and CueDelivery; drain before telemetry.
+Exact capacity/crash-loss tolerance belongs in the implementation spec.
 end note
 
 note bottom of Retention
-Run cleanup on app startup and periodically.
-Use ExerciseSet.telemetryExpiresAt as the Room purge anchor.
-Delete expired debug media from no-backup storage.
+ExerciseSet.telemetryExpiresAt is non-null from set start.
+Startup/periodic cleanup removes expired short-lived records/files.
 end note
 
 note bottom of CuePolicy
 Detection and delivery are separate facts.
-A FormEvent may be persisted but suppressed from TTS/overlay.
 Persist CueDelivery only when feedback is actually shown/spoken.
 end note
 
