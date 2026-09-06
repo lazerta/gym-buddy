@@ -1,12 +1,12 @@
-# Gym Buddy UML Overview v0.7
+# Gym Buddy UML Overview v0.8
 
-**ARCHITECTURE FROZEN.** Fifth review result: **P0 = 0, P1 = 0**. Remaining decisions belong to SPEC/tests/implementation.
+**ARCHITECTURE FROZEN / FINAL.** Final multi-pass review: **P0 = 0, architecture-level P1 = 0**.
 
 ## 1. System Context
 
 ```mermaid
 flowchart LR
-    U[Shawn\nSingle User] --> A[Gym Buddy Android App]
+    U[Single User] --> A[Gym Buddy Android App]
     C[CameraX] --> A
     H[Health Connect] --> A
     A --> T[Android TTS\nOffline voice only]
@@ -24,259 +24,170 @@ flowchart LR
 
 Real Gym Buddy personal data stays on the Android device.
 
-## 2. Android Component Architecture
+## 2. Final Realtime Architecture
 
 ```mermaid
 flowchart LR
     UI[Compose UI] --> CAM[CameraX]
     CAM --> FS[Latest-frame Scheduler]
     FS --> POSE[Bundled MediaPipe Pose]
-    POSE --> NORM[Coordinate Normalizer]
-    NORM --> SIG[Landmark Smoother / Motion Features]
-    SIG --> QG[Tracking Quality Gate]
-    QG --> ANA[Exercise-specific Analyzer]
-    QG --> UI
-    ANA --> MET[Biomechanics Metrics]
-    MET --> RULES[Deterministic Rule Engine]
-    RULES --> CUE[Cue Policy + Arbitrator]
-    CUE --> UI
-    CUE --> TTS[Offline-only Android TTS]
-
-    ANA --> TQ[TelemetryRingBuffer\nBest-effort]
-    ANA --> PQ[PriorityPersistenceQueue\nReserved capacity]
-    MET --> PQ
-    RULES --> PQ
-    CUE --> PQ
-    PQ --> BW[Async BatchWriter]
-    TQ --> BW
-    BW --> REPO[WorkoutRepository]
-    REPO --> DB[(Room)]
-
-    HC[Health Connect Adapter] --> HA[Health Aggregator]
-    HA --> REPO
-    RW[Retention Worker] --> REPO
-    RW --> FILES[App-private no-backup files]
-```
-
-`PriorityPersistenceQueue` prioritizes records but is not itself durable; durability begins after Room commit.
-
-## 3. Domain / Data Model
-
-```mermaid
-classDiagram
-    class UserProfile {
-      +heightCm
-      +preferredUnits
-      +activeTrainingPlanId
-      +activeTrainingPlanVersion
-    }
-    class TrainingPlan { +id +name +version }
-    class TrainingDay { +dayOfWeek +displayName +order }
-    class PlannedExercise { +exerciseId +order +notes }
-    class PlannedSet {
-      +setNumber
-      +targetLoadPct
-      +loadPercentBasis
-      +repsMin
-      +repsMax
-      +rirMin
-      +rirMax
-    }
-    class ExerciseDefinition { +id +displayName +analyzerType +defaultCameraView }
-    class CalibrationProfile { +exerciseId +version +cameraView +createdAt }
-    class DailyContext { +date +caloriesKcal +proteinG +carbsG +fatG +preWorkoutCarbsG +waterMl +sodiumMg }
-    class DailyHealthSummary { +date +sleepMinutes +sleepQuality +restingHeartRateBpm +steps +activeCaloriesKcal +sourceSummary }
-    class WeeklyBodyComposition { +weekStart +medianWeightKg +weightSampleCount +medianBodyFatPct +bodyFatSampleCount +sourceSummary }
-    class WorkoutSession { +startedAt +endedAt +trainingPlanId +trainingPlanVersion +appBuild +poseModelVersion }
-    class ExerciseExecution { +exerciseId +plannedExerciseId +order +analyzerVersion +metricVersion +calibrationVersion }
-    class ExerciseSet { +plannedSetId +setNumber +loadKg +targetReps +startedAt +endedAt +telemetryExpiresAt }
-    class Rep { +repNumber +startedAtElapsedNanos +endedAtElapsedNanos +completionState }
-    class TelemetrySample { +elapsedRealtimeNanos +repId nullable +phase nullable +landmarks +trackingConfidence }
-    class TrackingEvent { +elapsedRealtimeNanos +type +severity }
-    class RepMetric { +metricType +value +unit +confidence +metricVersion }
-    class FormEvent { +id +repId nullable +ruleId +ruleVersion +severity +confidence +startedAtElapsedNanos +endedAtElapsedNanos }
-    class FormEvidence { +key +observedValue +unit +comparator +thresholdValue +textValue }
-    class CueDelivery { +deliveredAtElapsedNanos +channel +message }
-    class CompactRepTrace { +traceVersion +schemaId +pointCount +normalizedTime }
-    class TraceChannel { +name +unit +side +values }
-
-    UserProfile "1" --> "many" TrainingPlan
-    TrainingPlan "1" --> "many" TrainingDay
-    TrainingDay "1" --> "many" PlannedExercise
-    PlannedExercise "1" --> "many" PlannedSet
-    PlannedExercise "many" --> "1" ExerciseDefinition
-    UserProfile "1" --> "many" CalibrationProfile
-    UserProfile "1" --> "many" DailyContext
-    UserProfile "1" --> "many" DailyHealthSummary
-    UserProfile "1" --> "many" WeeklyBodyComposition
-    UserProfile "1" --> "many" WorkoutSession
-    WorkoutSession "1" --> "many" ExerciseExecution
-    ExerciseExecution "many" --> "1" ExerciseDefinition
-    ExerciseExecution "1" --> "many" ExerciseSet
-    ExerciseSet "1" --> "many" Rep
-    ExerciseSet "1" --> "many" TelemetrySample
-    ExerciseSet "1" --> "many" TrackingEvent
-    ExerciseSet "1" --> "many" FormEvent
-    Rep "0..1" <-- "many" TelemetrySample
-    Rep "0..1" <-- "many" FormEvent
-    Rep "1" --> "many" RepMetric
-    FormEvent "1" --> "many" FormEvidence
-    FormEvent "1" --> "many" CueDelivery
-    Rep "1" --> "0..1" CompactRepTrace
-    CompactRepTrace "1" --> "many" TraceChannel
-    WorkoutSession "many" --> "0..1" DailyContext
-    WorkoutSession "many" --> "0..1" DailyHealthSummary
-```
-
-Key points: `FormEvent` is set-scoped with optional `repId`; `telemetryExpiresAt` is non-null from set creation; `CompactRepTrace` is generic; `loadPercentBasis` is nullable rather than guessed.
-
-## 4. Live Workout Analysis Sequence
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant C as CameraX
-    participant F as Frame Scheduler
-    participant P as MediaPipe
-    participant N as Normalize + Smooth
-    participant G as Quality Gate
-    participant A as Exercise Analyzer
-    participant R as Rules
-    participant Q as Cue Arbitrator
-    participant T as Telemetry Queue
-    participant X as Priority Persistence Queue
-    participant W as BatchWriter
-    participant DB as Room
-
-    U->>DB: Create set; fail-safe expiry = start + 7 days
-    U->>C: Start selected exercise set
-    loop realtime
-      C->>F: frame + monotonic timestamp
-      F->>P: newest eligible frame
-      P-->>N: landmarks + confidence
-      N-->>G: canonical MovementFrame
-      alt tracking invalid
-        G-->>U: setup / visibility guidance
-      else valid
-        G-->>A: valid MovementFrame
-        A->>A: update rep state + metrics
-        A->>R: metrics + phase + history
-        R-->>Q: set-scoped FormEvent + structured FormEvidence
-        R-->>X: persist detected issue + evidence
-        alt cue selected
-          Q-->>U: one prioritized visual / offline-TTS cue
-          Q-->>X: CueDelivery
-        end
-        A-->>T: best-effort raw telemetry
-        opt rep completed
-          A-->>X: rep summary + CompactRepTrace + final metrics
-        end
-      end
-    end
-    loop async priority persistence
-      X->>W: priority batch first
-      W->>DB: transaction
-    end
-    loop async telemetry persistence
-      T->>W: telemetry batch
-      W->>DB: transaction
-    end
-    U->>DB: Close set; expiry = end + 7 days
-```
-
-## 5. Health Connect Sequence
-
-```mermaid
-sequenceDiagram
-    participant SRC as RENPHO / Watch / Health Apps
-    participant HC as Health Connect
-    participant G as Gym Buddy Adapter
-    participant A as Health Aggregator
-    participant DB as Room
-
-    SRC->>HC: Optional upstream sync
-    G->>HC: Read permitted date range
-    HC-->>G: sleep / weight / body fat / resting HR / steps / active calories
-    G->>G: normalize + deduplicate in memory
-    G->>A: normalized records
-    A->>A: build DailyHealthSummary
-    A->>A: weekly medians + sample counts
-    A->>DB: persist compact summaries only
-    A->>A: discard fine-grained imported records
-```
-
-## 6. Realtime Processing Pipeline
-
-```mermaid
-flowchart LR
-    C[CameraX] --> F[Latest-frame Scheduler]
-    F --> P[Bundled MediaPipe Pose]
-    P --> N[Coordinate Normalizer]
-    N --> S[Landmark Smoother]
+    POSE --> OG[OrderedResultGate]
+    OG --> AL[Serialized Analysis Lane]
+    AL --> TS[Telemetry Sampler + Chunker]
+    AL --> N[Coordinate Normalizer]
+    N --> S[Confidence-aware Signal Processor]
     S --> G{Tracking Quality Gate}
-    G -- Invalid --> X[Setup/tracking guidance only]
-    G -- Valid --> A[Exercise-specific Analyzer]
+    G -- Invalid --> O[Setup / tracking guidance]
+    G -- Discontinuity --> RC[TemporalResetCoordinator]
+    G -- Valid --> A[Exercise Analyzer]
+    RC --> S
+    RC --> A
     A --> M[Biomechanics Metrics]
-    M --> R[Deterministic Rules]
-    R --> Q[Cue Arbitration]
-    Q --> O[Overlay / Offline TTS]
-    A --> T[TelemetryRingBuffer]
-    A --> PP[PriorityPersistenceQueue]
-    M --> PP
-    R --> PP
-    Q --> PP
-    PP --> W[Async BatchWriter]
-    T --> W
+    M --> R[Rule Engine + Episode Tracker]
+    R --> Q[Cue Arbitrator]
+    Q --> O2[Overlay / Offline TTS]
+
+    A --> RF[Rep Finalization Assembler]
+    M --> RF
+    R --> RF
+    RF --> PQ[PriorityPersistenceQueue]
+    R --> PQ
+    Q --> PQ
+    TS --> TQ[Short-lived Telemetry Buffer]
+    PQ --> W[Serialized BatchWriter]
+    TQ --> W
     W --> DB[(Room)]
 ```
 
-## 7. Persistence / Data Lifecycle
+Key guarantees:
+- late/out-of-order inference results are discarded before stateful analysis;
+- all stateful biomechanics code runs serially on one temporal lane per active set;
+- low-confidence landmarks do not contaminate filter state as valid samples;
+- tracking/setup/view discontinuities reset signal/analyzer/metric/trace/rule temporal state together;
+- persistence is off the coaching critical path.
+
+## 3. Final Domain Shape
+
+```mermaid
+classDiagram
+    class TrainingPlan
+    class TrainingDay
+    class PlannedExercise
+    class PlannedSet
+    class ExerciseDefinition
+    class WorkoutSession
+    class ExerciseExecution
+    class ExerciseParameterSnapshot
+    class ExerciseSet
+    class ResistanceSnapshot
+    class Rep
+    class RepMetric
+    class CompactRepTrace
+    class FormEvent
+    class FormEvidence
+    class CueDelivery
+    class PoseObservationChunk
+
+    TrainingPlan --> TrainingDay
+    TrainingDay --> PlannedExercise
+    PlannedExercise --> PlannedSet
+    PlannedExercise --> ExerciseDefinition
+    WorkoutSession --> ExerciseExecution
+    ExerciseExecution --> ExerciseDefinition
+    ExerciseExecution --> ExerciseParameterSnapshot
+    ExerciseExecution --> ExerciseSet
+    ExerciseSet --> ResistanceSnapshot
+    ExerciseSet --> Rep
+    ExerciseSet --> FormEvent
+    ExerciseSet --> PoseObservationChunk
+    Rep --> RepMetric
+    Rep --> CompactRepTrace
+    FormEvent --> FormEvidence
+    FormEvent --> CueDelivery
+```
+
+Important semantics:
+- plan versions are immutable once referenced;
+- `PlannedSet` supports load-percent ranges and nullable basis;
+- `ExerciseExecution` snapshots `pipelineVersion`, `analyzerVersion`, `metricVersion`, `ruleSetVersion`, `cuePolicyVersion`, and calibration provenance;
+- `ExerciseParameterSnapshot` stores movement configuration such as `benchAngleDeg`;
+- `ResistanceSnapshot` preserves semantics such as `PER_HAND`, `MACHINE_STACK`, `ASSISTANCE`, etc.;
+- durable realtime timestamps are offsets from the set's monotonic start origin;
+- `FormEvent.scope=REP` and `scope=SET` have explicit lifecycle semantics;
+- `FormEvent.eventRevision` prevents stale upserts.
+
+## 4. Persistence Correctness
 
 ```mermaid
 flowchart TD
-    F[Camera Frame] -->|default| D[Discard immediately]
-    F -->|debug mode only| V[Debug Video]
-    P[Pose Telemetry] -->|set-scoped 7-day expiry| DB[(Room)]
-    TE[Tracking / Calibration Debug] -->|same expiry| DB
-    M[Rep Metrics] -->|long-term| DB
-    E[Set-scoped FormEvent + FormEvidence] -->|long-term| DB
-    CD[CueDelivery] -->|long-term| DB
-    CT[CompactRepTrace + TraceChannels] -->|long-term| DB
-    DH[DailyHealthSummary] -->|long-term| DB
-    BC[WeeklyBodyComposition] -->|long-term| DB
-    V -->|7-day expiry| LF[App-private no-backup storage]
-    RW[Retention Worker] -->|startup + periodic purge| DB
-    RW --> LF
+    RP[Rep completed / partial finalized] --> B[RepFinalizationBundle]
+    B --> PQ[PriorityPersistenceQueue]
+    FE[Revisioned set-scoped FormEvent updates] --> PQ
+    CD[CueDelivery] --> PQ
+    PQ --> W[Serialized writer\ncommandSequence ordered]
+    W --> DB[(Room)]
+    CLOSE[SetCloseBarrier\nhighWatermark=N] --> PQ
 ```
 
-Retention fail-safe: initialize `telemetryExpiresAt = startedAt + 7 days`; on normal close update to `endedAt + 7 days`. A crash cannot create immortal short-lived telemetry.
+`RepFinalizationBundle` is atomic: Rep + final metrics + optional compact trace + rep-scoped FormEvent finalizations commit in one Room transaction.
 
-## MVP Scope
+`SetCloseBarrier(highWatermark)` is reserved/non-droppable. The UI reports a set saved only after all required priority commands through the high-water mark are durable.
 
-First exercise: **Incline Dumbbell Press**.
+## 5. Short-lived Data
+
+```mermaid
+flowchart LR
+    P[Ordered PoseObservation] --> SC[Sampler + Chunker]
+    SC --> C[PoseObservationChunk]
+    C --> B[Best-effort Telemetry Buffer]
+    B --> DB[(Room)]
+    TE[TrackingEvent] --> B
+    RW[Retention Worker] --> DB
+```
+
+- raw camera frames are discarded immediately;
+- pose observations are rate-limited and chunked rather than one Room row per frame;
+- pose/debug chunks and tracking events expire with the owning set after 7 days;
+- expired rows are excluded from reads immediately and physically purged locally later;
+- debug video is OFF by default, app-private/no-backup, max 7 days.
+
+## 6. Health Context
+
+Health Connect remains optional and outside the realtime critical path. Fine-grained imported records are normalized/aggregated in memory, then discarded. Long-term Gym Buddy data is compact:
+- `DailyHealthSummary` for daily sleep/activity context;
+- `WeeklyBodyComposition` for weekly median weight/body-fat plus sample counts.
+
+Missing/stale/denied Health Connect data never blocks a workout.
+
+## 7. Camera / Tracking State
+
+`08-camera-setup-state.puml` defines setup validation and tracking recovery. A significant tracking gap or material camera/view/setup change is a temporal discontinuity. The interrupted rep is not resumed; temporal state is reset and the app reacquires a fresh stable movement state.
+
+## 8. MVP Rep State Machine
+
+`09-incline-db-press-state-machine.puml` defines:
 
 ```text
-CameraX -> latest-frame scheduler -> bundled MediaPipe Pose
--> coordinate normalization -> smoothing -> quality gate
--> InclineDumbbellPressAnalyzer -> metrics -> deterministic rules
--> cue arbitration -> overlay / offline-only TTS
-
-raw telemetry -> TelemetryRingBuffer
-higher-value records -> PriorityPersistenceQueue
-both -> async BatchWriter -> Room
+ACQUIRING_START
+-> TOP
+-> ECCENTRIC
+-> BOTTOM
+-> CONCENTRIC
+-> REP_COMPLETE
+-> TOP
 ```
 
-## Architectural Invariants
+Rep recognition uses combined trend evidence, body-local wrist trajectory, velocity reversal, minimum ROM, hysteresis, dwell time, and tracking confidence. It does **not** depend on one universal elbow-angle magic number.
 
-- Real personal data stays on the Android device only.
-- No backend, LLM, login, INTERNET permission, cloud path, or personal-data export/share in MVP.
-- Pose model bundled in APK; Android cloud backup disabled.
-- Offline TTS voice only; visual fallback otherwise.
-- Tracking quality can veto analysis.
-- Detection, evidence and cue delivery are separately observable.
-- Form events may exist without a recognized rep.
-- Persistence cannot block realtime coaching.
-- Priority queue is not itself durable; Room commit is the durability boundary.
-- 7-day short-lived data always has a non-null expiry anchor.
-- Weight/body-fat is weekly, not daily.
-- GitHub and Google Drive never contain real Gym Buddy personal data.
+## 9. Retention / Privacy Boundary
+
+- Real personal data: Android device only.
+- GitHub: code, architecture, tests, synthetic/anonymized fixtures only.
+- Google Drive: specs, architecture, non-personal reports, builds only.
+- No `android.permission.INTERNET` in MVP.
+- No backend, LLM, account system, personal-data export/share, analytics upload, or cloud backup.
+- Offline TTS only; visual fallback otherwise.
+
+## Final Status
+
+**v0.8 is the frozen architecture.** Further decisions belong to SPEC / acceptance criteria / tests / implementation: exact FPS, sampling rate, chunk codec, confidence thresholds, tracking-gap tolerance, state-machine hysteresis/dwell, biomechanics thresholds, cue cooldowns, queue capacity, Room encoding, Health Connect aggregation/timezone rules, and crash-loss tolerance.
