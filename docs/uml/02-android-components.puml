@@ -6,43 +6,65 @@ skinparam componentStyle rectangle
 package "gym-buddy Android App" {
   [Compose UI] as UI
   [Camera Controller\n(CameraX)] as Camera
+  [Frame Scheduler\nlatest-frame / backpressure] as Scheduler
   [Pose Perception\n(MediaPipe)] as Pose
-  [Signal Processor] as Signal
+  [Coordinate Normalizer] as Normalize
+  [Signal Processor\nSmoothing / velocity] as Signal
+  [Tracking Quality Gate] as Quality
   [Exercise Analyzer\nIncline DB Press first] as Analyzer
-  [Rep State Machine] as RepSM
   [Biomechanics Metrics] as Metrics
   [Deterministic Rule Engine] as Rules
-  [Cue Engine\nOverlay + TTS] as Cue
+  [Cue Policy + Arbitrator] as CuePolicy
+  [Live Overlay] as Overlay
   [Workout Repository] as Repo
   [Health Connect Adapter] as Health
   [Room Database] as Room
 }
 
-UI --> Camera : start/stop session
-Camera --> Pose : frames
-Pose --> Signal : pose landmarks
-Signal --> Analyzer : smoothed landmarks
-Analyzer --> RepSM : temporal movement state
-Analyzer --> Metrics : joint / trajectory features
-RepSM --> Metrics : phase context
-Metrics --> Rules : derived metrics
-Rules --> Cue : form events
-Cue --> UI : realtime overlay
-Cue --> [Android TextToSpeech]
-Analyzer --> Repo : pose samples / reps / metrics
-Rules --> Repo : form events
-Health --> Repo : daily health context
+UI --> Camera : start/stop set
+Camera --> Scheduler : frames + timestamps
+Scheduler --> Pose : newest eligible frame
+Pose --> Normalize : landmarks + confidence
+Normalize --> Signal : canonical coordinates
+Signal --> Quality : smoothed MovementFrame
+Quality --> Analyzer : valid frames only
+Quality --> Overlay : tracking/calibration guidance
+Analyzer --> Metrics : phase + movement features
+Metrics --> Rules : metrics + phase + recent history
+Rules --> CuePolicy : candidate FormEvents
+CuePolicy --> Overlay : highest-priority actionable cue
+CuePolicy --> [Android TextToSpeech] : optional short cue
+Analyzer --> Repo : telemetry / rep boundaries
+Metrics --> Repo : rep metrics
+Rules --> Repo : rule evidence / FormEvents
+Health --> Repo : DailyContext / provenance
 Repo --> Room
 UI --> Repo : history / session state
 
 note bottom of Pose
 ML ends here.
-Everything downstream is normal code.
+Everything downstream is deterministic code.
+end note
+
+note bottom of Scheduler
+Do not queue stale camera frames.
+Prefer latest-frame processing so latency stays bounded.
+end note
+
+note bottom of Quality
+If required joints are missing, confidence is low,
+or camera setup is invalid: DO NOT ANALYZE / DO NOT CUE.
 end note
 
 note bottom of Rules
-Rules must be deterministic,
-versioned, testable, and explainable.
+Rules are deterministic, versioned,
+testable, explainable, and evidence-preserving.
+end note
+
+note bottom of CuePolicy
+Multiple simultaneous issues must not create cue spam.
+Apply severity/priority, persistence, cooldown,
+and max-cues-per-rep/set policy.
 end note
 
 @enduml
