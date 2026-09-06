@@ -5,6 +5,7 @@ skinparam componentStyle rectangle
 
 package "gym-buddy Android App" {
   [Compose UI] as UI
+  [Workout Session Controller] as Session
   [Camera Controller\n(CameraX)] as Camera
   [Frame Scheduler\nlatest-frame / backpressure] as Scheduler
   [Pose Perception\n(MediaPipe, bundled model)] as Pose
@@ -23,10 +24,15 @@ package "gym-buddy Android App" {
   [Health Connect Adapter] as Health
   [Health Aggregator] as HealthAgg
   [Retention Worker\nstartup + periodic cleanup] as Retention
+  [Startup Recovery] as Recovery
   [Room Database] as Room
 }
 
-UI --> Camera : start/stop set
+UI --> Session : start/stop set
+Session --> Repo : create/close workout hierarchy
+Session --> Camera : start / stop accepting frames
+Session --> Scheduler : await analysis quiescence on Stop Set
+Session --> PriorityQueue : SetCloseBarrier after pipeline idle
 Camera --> Scheduler : frames + timestamps
 Scheduler --> Pose : newest eligible frame
 Pose --> TelemetryBuffer : PoseObservation\n(no image bytes)
@@ -47,14 +53,17 @@ Metrics --> PriorityQueue : final rep metrics
 Rules --> PriorityQueue : FormEvent + FormEvidence[]
 CuePolicy --> PriorityQueue : CueDelivery when actually delivered
 TelemetryBuffer --> BatchWriter : best-effort short-lived batches
-PriorityQueue --> BatchWriter : priority batches first
+PriorityQueue --> BatchWriter : priority batches first / SetCloseBarrier
 BatchWriter --> Repo : persist transaction
 Repo --> Room
+BatchWriter --> Session : SetCloseBarrier commit ack
+Session --> UI : set saved only after ack
 
 Health --> HealthAgg : permitted Health Connect records
 HealthAgg --> Repo : compact daily / weekly summaries only
 Retention --> Repo : delete expired set telemetry/tracking data
 Retention --> [App-private no-backup files] : delete expired debug media
+Recovery --> Repo : stale ACTIVE -> INTERRUPTED on startup
 UI --> Repo : history / workout state
 
 note bottom of Pose
@@ -62,6 +71,15 @@ ML ends here. Everything downstream is deterministic code.
 Pose model is bundled; no runtime network download.
 PoseObservation contains landmarks/confidence/transform metadata only,
 never camera image bytes.
+end note
+
+note bottom of Session
+Stop Set ordering is strict:
+1) stop accepting new camera frames,
+2) await in-flight analysis quiescence,
+3) enqueue SetCloseBarrier,
+4) show saved/closed only after Room commit ack.
+Raw short-lived telemetry need not block this barrier.
 end note
 
 note bottom of TelemetryBuffer
@@ -73,20 +91,12 @@ end note
 note bottom of PriorityQueue
 This is an in-memory PRIORITY queue, not durable storage.
 Durability begins only after Room commit.
-Reserve capacity for rep summaries, compact traces,
-metrics, structured evidence, CueDelivery and SetCloseBarrier.
-On normal Stop Set, a SetCloseBarrier is acknowledged only after
-all earlier priority records and the set-close transaction commit.
+Reserve control capacity for SetCloseBarrier and higher-value records.
 end note
 
-note bottom of Retention
-ExerciseSet.telemetryExpiresAt is non-null from set start.
-Startup/periodic cleanup removes expired short-lived records/files.
-end note
-
-note bottom of CuePolicy
-Detection and delivery are separate facts.
-Persist CueDelivery only when feedback is actually shown/spoken.
+note bottom of Recovery
+After process death, stale ACTIVE WorkoutSession /
+ExerciseExecution / ExerciseSet records become INTERRUPTED.
 end note
 
 @enduml
