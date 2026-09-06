@@ -117,7 +117,7 @@ class ExerciseSet {
   targetReps: Int?
   startedAt: Instant
   endedAt: Instant?
-  telemetryExpiresAt: Instant?
+  telemetryExpiresAt: Instant
 }
 
 class Rep {
@@ -153,6 +153,7 @@ class RepMetric {
 
 class FormEvent {
   id: UUID
+  repId: UUID?
   ruleId: String
   ruleVersion: Int
   severity: Severity
@@ -210,61 +211,44 @@ ExerciseExecution "1" *-- "0..*" ExerciseSet
 ExerciseSet "1" *-- "0..*" TelemetrySample
 ExerciseSet "1" *-- "0..*" TrackingEvent
 ExerciseSet "1" *-- "0..*" Rep
+ExerciseSet "1" *-- "0..*" FormEvent
 Rep "0..1" <-- "0..*" TelemetrySample : optional repId
+Rep "0..1" <-- "0..*" FormEvent : optional repId
 Rep "1" *-- "0..*" RepMetric
-Rep "1" *-- "0..*" FormEvent
 FormEvent "1" *-- "1..*" FormEvidence
 FormEvent "1" *-- "0..*" CueDelivery
 Rep "1" *-- "0..1" CompactRepTrace
 CompactRepTrace "1" *-- "1..*" TraceChannel
 
-note right of TrainingPlan
-Keep plan versions as immutable definitions.
-UserProfile points to the active plan/version.
-WorkoutSession snapshots the plan id/version used that day.
-end note
-
 note right of PlannedSet
 targetLoadPct is not meaningful without a basis.
 Store loadPercentBasis when known; leave it null when the
 source plan does not define the denominator rather than guessing.
-Supports per-set rep and RIR targets.
 end note
 
 note right of ExerciseSet
-Use wall-clock startedAt/endedAt for history and retention.
-Set telemetryExpiresAt when the set closes (normally end + 7 days).
-RetentionWorker deletes short-lived children using this anchor.
+telemetryExpiresAt is NON-NULL from set creation.
+Initialize fail-safe expiry at startedAt + 7 days.
+On normal set close, update it to endedAt + 7 days.
+A crash therefore cannot leave short-lived data with no expiry.
 end note
 
 note right of TelemetrySample
-Realtime durations use monotonic elapsed-time timestamps,
-not wall-clock time. Retain high-frequency samples for 7 days only.
+Realtime durations use monotonic elapsed-time timestamps.
 Telemetry belongs to the set and may optionally reference a Rep.
+end note
+
+note right of FormEvent
+FormEvent belongs to the ExerciseSet and may optionally reference a Rep.
+This supports issues detected during setup/top position, partial attempts,
+or movement that never becomes a completed/recognized rep.
+Evidence and actual cue delivery remain separate children.
 end note
 
 note right of CompactRepTrace
 Generic long-term compact replay artifact.
 schemaId + TraceChannel[] allow exercise-specific signals.
-Use a fixed small number of normalized points per rep.
 Full-fidelity re-analysis is limited to the 7-day telemetry window.
-end note
-
-note right of FormEvent
-FormEvent means a persisted detected issue, not necessarily a spoken cue.
-Evidence is structured as FormEvidence[] instead of opaque JSON.
-end note
-
-note right of CueDelivery
-Persist only cues actually delivered to the user.
-A FormEvent may be suppressed by CueArbitrator and have zero deliveries.
-channel distinguishes VISUAL / TTS if needed.
-end note
-
-note right of DailyHealthSummary
-Aggregate Health Connect records locally.
-Do not persist fine-grained HR/step/source records long-term.
-Missing health data never blocks workout tracking.
 end note
 
 @enduml
