@@ -1,0 +1,49 @@
+@startuml
+!theme plain
+skinparam shadowing false
+
+autonumber
+actor Shawn
+participant "Gym Buddy" as App
+participant "HealthConnectAdapter" as Adapter
+participant "Android Health Connect" as HC
+participant "RENPHO / Other Health Apps" as Source
+participant "WorkoutRepository" as Repo
+database "Room / SQLite" as DB
+
+opt upstream health app syncs data
+  Source -> HC : weight / body fat / sleep / HR / steps
+end
+
+Shawn -> App : open app / refresh daily context
+App -> Adapter : refresh(date range)
+Adapter -> HC : check permissions + availability
+
+alt permissions granted
+  Adapter -> HC : read SleepSessionRecord
+  HC --> Adapter : sleep records
+  Adapter -> HC : read WeightRecord / BodyFatRecord
+  HC --> Adapter : body composition records
+  Adapter -> HC : read RestingHeartRate / HeartRate / Steps
+  HC --> Adapter : health/activity records
+  Adapter -> Adapter : normalize + deduplicate + map source metadata
+  Adapter -> Repo : upsert health samples + DailyContext
+  Repo -> DB : persist locally
+  Repo --> App : current DailyContext
+else permissions unavailable or denied
+  Adapter --> App : health integration unavailable
+  App --> Shawn : workout monitoring still fully usable
+end
+
+note over App,DB
+Health Connect is optional context.
+It is never in the camera-analysis critical path.
+Workout monitoring must continue in airplane mode.
+end note
+
+note over Source,HC
+RENPHO integration is indirect when possible.
+Gym Buddy does not depend on a proprietary RENPHO API.
+end note
+
+@enduml
