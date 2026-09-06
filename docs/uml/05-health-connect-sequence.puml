@@ -8,6 +8,7 @@ participant "Gym Buddy" as App
 participant "HealthConnectAdapter" as Adapter
 participant "Android Health Connect" as HC
 participant "RENPHO / Other Health Apps" as Source
+participant "HealthAggregator" as Agg
 participant "WorkoutRepository" as Repo
 database "Room / SQLite" as DB
 
@@ -15,7 +16,7 @@ opt upstream health app syncs data
   Source -> HC : weight / body fat / sleep / HR / steps
 end
 
-Shawn -> App : open app / refresh daily context
+Shawn -> App : open app / refresh context
 App -> Adapter : refresh(date range)
 Adapter -> HC : check permissions + availability
 
@@ -23,27 +24,37 @@ alt permissions granted
   Adapter -> HC : read SleepSessionRecord
   HC --> Adapter : sleep records
   Adapter -> HC : read WeightRecord / BodyFatRecord
-  HC --> Adapter : body composition records
-  Adapter -> HC : read RestingHeartRate / HeartRate / Steps
+  HC --> Adapter : body-composition records
+  Adapter -> HC : read RestingHeartRate / Steps / ActiveCalories
   HC --> Adapter : health/activity records
-  Adapter -> Adapter : normalize + deduplicate + map source metadata
-  Adapter -> Repo : upsert health samples + DailyContext
-  Repo -> DB : persist locally
-  Repo --> App : current DailyContext
+  Adapter -> Adapter : normalize + deduplicate in memory
+  Adapter -> Agg : normalized permitted records
+  Agg -> Agg : build DailyHealthSummary
+  Agg -> Agg : weekly median weight/body-fat + sample counts
+  Agg -> Repo : upsert compact summaries only
+  Repo -> DB : persist DailyHealthSummary / WeeklyBodyComposition
+  Repo --> App : current compact context
+  Agg -> Agg : discard fine-grained imported records after aggregation
 else permissions unavailable or denied
   Adapter --> App : health integration unavailable
   App --> Shawn : workout monitoring still fully usable
 end
 
 note over App,DB
-Health Connect is optional context.
-It is never in the camera-analysis critical path.
-Workout monitoring must continue in airplane mode.
+Health Connect is optional context and never in the camera-analysis critical path.
+Missing, stale or denied health data must not block a workout.
+end note
+
+note over Adapter,Agg
+Fine-grained Health Connect records are processing inputs,
+not durable Gym Buddy records.
+Keep long-term daily summaries and weekly body-composition snapshots only.
 end note
 
 note over Source,HC
 RENPHO integration is indirect when possible.
 Gym Buddy does not depend on a proprietary RENPHO API.
+Upstream apps may have their own cloud behavior outside Gym Buddy's boundary.
 end note
 
 @enduml
