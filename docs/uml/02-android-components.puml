@@ -16,7 +16,7 @@ package "gym-buddy Android App" {
   [Deterministic Rule Engine] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
-  [Telemetry Ring Buffer\nbounded / drop-oldest] as TelemetryBuffer
+  [Telemetry Ring Buffer\nbounded / best-effort] as TelemetryBuffer
   [Durable Event Queue\nreserved priority lane] as DurableQueue
   [Batch Writer\noff realtime path] as BatchWriter
   [Workout Repository] as Repo
@@ -36,14 +36,15 @@ Quality --> Analyzer : valid frames only
 Quality --> Overlay : tracking/calibration guidance
 Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + recent history
-Rules --> CuePolicy : candidate FormEvents
+Rules --> CuePolicy : persisted FormEvent + structured FormEvidence
 CuePolicy --> Overlay : highest-priority actionable cue
 CuePolicy --> [Android TextToSpeech] : offline voice only; otherwise visual fallback
 
 Analyzer --> TelemetryBuffer : raw telemetry / transient tracking data
 Analyzer --> DurableQueue : completed rep summary + CompactRepTrace
 Metrics --> DurableQueue : durable final rep metrics
-Rules --> DurableQueue : rule evidence / FormEvents
+Rules --> DurableQueue : FormEvent + FormEvidence[]
+CuePolicy --> DurableQueue : CueDelivery when a cue is actually delivered
 TelemetryBuffer --> BatchWriter : best-effort batches
 DurableQueue --> BatchWriter : priority durable batches
 BatchWriter --> Repo : persist transaction
@@ -51,7 +52,7 @@ Repo --> Room
 
 Health --> HealthAgg : permitted Health Connect records
 HealthAgg --> Repo : compact daily / weekly summaries only
-Retention --> Repo : delete expired 7-day Room records
+Retention --> Repo : delete expired set telemetry/tracking data
 Retention --> [App-private no-backup files] : delete expired debug media
 UI --> Repo : history / workout state
 
@@ -73,25 +74,25 @@ end note
 
 note bottom of TelemetryBuffer
 Raw/high-frequency data is best-effort.
-Drop oldest raw telemetry under pressure.
-Never let it block coaching.
+Never let storage pressure block coaching.
 end note
 
 note bottom of DurableQueue
 Reserve capacity for rep summaries, compact traces,
-metrics and FormEvents. Drain before raw telemetry.
-Do not intentionally drop durable records during normal operation.
+metrics, structured rule evidence and CueDelivery records.
+Drain before raw telemetry.
 end note
 
 note bottom of Retention
 Run cleanup on app startup and periodically.
-Delete telemetry/tracking/debug media older than 7 days.
+Use ExerciseSet.telemetryExpiresAt as the Room purge anchor.
+Delete expired debug media from no-backup storage.
 end note
 
 note bottom of CuePolicy
-Multiple simultaneous issues must not create cue spam.
-TTS must use a locally installed non-network voice;
-if unavailable, use visual feedback only.
+Detection and delivery are separate facts.
+A FormEvent may be persisted but suppressed from TTS/overlay.
+Persist CueDelivery only when feedback is actually shown/spoken.
 end note
 
 @enduml
