@@ -70,6 +70,7 @@ class DailyContext {
 
 class DailyHealthSummary {
   date: LocalDate
+  aggregationVersion: Int
   sleepMinutes: Int?
   sleepQuality: Int?
   restingHeartRateBpm: Double?
@@ -80,6 +81,7 @@ class DailyHealthSummary {
 
 class WeeklyBodyComposition {
   weekStart: LocalDate
+  aggregationVersion: Int
   medianWeightKg: Double?
   weightSampleCount: Int
   medianBodyFatPct: Double?
@@ -106,8 +108,10 @@ class ExerciseExecution {
   startedAt: Instant
   endedAt: Instant?
   status: String
+  pipelineVersion: Int
   analyzerVersion: Int
   metricVersion: Int
+  cuePolicyVersion: Int
   calibrationProfileId: UUID?
   calibrationVersion: Int?
 }
@@ -133,6 +137,7 @@ class Rep {
 }
 
 class PoseObservation {
+  observationSchemaVersion: Int
   elapsedRealtimeNanos: Long
   imageLandmarks: PoseLandmark[]
   worldLandmarks: PoseLandmark[]?
@@ -233,8 +238,9 @@ source plan does not define the denominator rather than guessing.
 end note
 
 note right of ExerciseExecution
-Store both calibrationProfileId and calibrationVersion when used.
-A version number alone is not enough provenance if multiple profiles exist.
+pipelineVersion covers shared deterministic normalization/smoothing/
+quality-gate semantics. Exercise-specific analyzer/metric/cue-policy
+versions are also snapshotted. Store both calibration profile id + version.
 end note
 
 note right of ExerciseSet
@@ -255,6 +261,11 @@ Short-lived perception output only; never image/video bytes.
 Captured immediately after MediaPipe and before normalization/smoothing
 so recent replay can re-run downstream deterministic processing.
 Storage is best-effort and may contain gaps under pressure.
+end note
+
+note right of DailyHealthSummary
+aggregationVersion preserves the meaning of compact summaries if
+Health Connect dedupe/aggregation logic changes later.
 end note
 
 note right of FormEvent
