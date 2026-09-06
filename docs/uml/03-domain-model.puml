@@ -167,10 +167,11 @@ class FormEvent {
   repId: UUID?
   ruleId: String
   ruleVersion: Int
+  status: String
   severity: Severity
   confidence: Double
   startedAtElapsedNanos: Long
-  endedAtElapsedNanos: Long
+  endedAtElapsedNanos: Long?
 }
 
 class FormEvidence {
@@ -269,10 +270,11 @@ Health Connect dedupe/aggregation logic changes later.
 end note
 
 note right of FormEvent
-FormEvent belongs to the ExerciseSet and may optionally reference a Rep.
-This supports issues detected during setup/top position, partial attempts,
-or movement that never becomes a completed/recognized rep.
-Evidence and actual cue delivery remain separate children.
+One continuous detected issue is one stateful episode, not one row/frame.
+Typical lifecycle: PENDING in memory -> ACTIVE when persistence threshold
+is met -> FINALIZED when cleared, rep/set ends, or analyzer resets.
+Persist activation/finalization using the same FormEvent id.
+CueDelivery remains a separate child and may be absent.
 end note
 
 note right of CompactRepTrace
