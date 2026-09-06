@@ -16,13 +16,15 @@ participant "BiomechanicsMetrics" as Metrics
 participant "RuleEngine" as Rules
 participant "CueArbitrator" as Cue
 queue "TelemetryRingBuffer" as TelemetryQ
-queue "DurableEventQueue" as DurableQ
+queue "PriorityPersistenceQueue" as PriorityQ
 participant "BatchWriter" as Writer
 participant "WorkoutRepository" as Repo
 database "Room / SQLite" as DB
 
 Shawn -> UI : select Incline Dumbbell Press
 Shawn -> UI : Start Set
+UI -> Repo : create ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days
+Repo -> DB : persist set state
 UI -> Camera : start stream
 
 loop each camera frame
@@ -38,15 +40,15 @@ loop each camera frame
     Analyzer -> Analyzer : update rep state
     Analyzer -> Metrics : calculate metrics
     Analyzer -> Rules : evaluate metrics / phase / history
-    Rules --> Cue : persisted FormEvent + FormEvidence[]
-    Rules -> DurableQ : FormEvent + structured evidence
+    Rules --> Cue : set-scoped FormEvent + FormEvidence[]\noptional repId
+    Rules -> PriorityQ : FormEvent + structured evidence
 
     alt CueArbitrator selects feedback
       Cue --> UI : one prioritized visual cue
       opt offline TTS voice available
         Cue --> UI : speak same short cue via local TTS
       end
-      Cue -> DurableQ : CueDelivery
+      Cue -> PriorityQ : CueDelivery
     else issue suppressed by priority/cooldown
       Cue --> Cue : no delivery record
     end
@@ -54,14 +56,14 @@ loop each camera frame
     Analyzer -> TelemetryQ : raw telemetry
     alt rep completed
       Analyzer --> UI : increment rep count
-      Analyzer -> DurableQ : rep summary + CompactRepTrace
-      Metrics -> DurableQ : final rep metrics
+      Analyzer -> PriorityQ : rep summary + CompactRepTrace
+      Metrics -> PriorityQ : final rep metrics
     end
   end
 end
 
-loop async durable persistence
-  DurableQ -> Writer : next durable batch
+loop async priority persistence
+  PriorityQ -> Writer : next priority batch
   Writer -> Repo : persist
   Repo -> DB : transaction
 end
@@ -73,18 +75,17 @@ end
 
 Shawn -> UI : Stop Set
 UI -> Camera : stop stream
-UI -> DurableQ : finalize set + telemetryExpiresAt
+UI -> PriorityQ : finalize set summary\nendedAt + telemetryExpiresAt = endedAt + 7 days
 
-note over TelemetryQ,DurableQ
+note over TelemetryQ,PriorityQ
 Storage is outside the coaching critical path.
-Telemetry is best-effort; durable summaries, evidence and cue deliveries
-use a separate priority queue and are persisted first.
+PriorityPersistenceQueue is in-memory priority scheduling,
+not durable storage; records become durable after Room commit.
 end note
 
 note over Rules,Cue
-Detection and feedback delivery are different facts.
-Persist structured FormEvidence for detected issues.
-Persist CueDelivery only when a cue is actually shown/spoken.
+FormEvent belongs to the set and can optionally reference a rep.
+Detection/evidence and feedback delivery are separately persisted.
 end note
 
 @enduml
