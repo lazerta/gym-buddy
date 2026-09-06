@@ -1,6 +1,6 @@
-# Gym Buddy UML Overview v0.2
+# Gym Buddy UML Overview v0.3
 
-Pre-implementation architecture baseline for a single-user, local-first Android biomechanics coach.
+Architecture freeze candidate for a single-user, local-first Android biomechanics coach.
 
 ## 1. System Context
 
@@ -12,14 +12,17 @@ flowchart LR
     A --> T[Android TTS / Overlay]
     A --> D[(Room / SQLite)]
 
-    subgraph OnDevice[On-device boundary]
+    subgraph OnDevice[On-device personal-data boundary]
       A
       T
       D
     end
 
-    N[No backend\nNo LLM\nNo login\nNo video upload\nAirplane-mode workout monitoring] -. constraints .-> A
+    N[No backend\nNo LLM\nNo login\nNo Gym Buddy cloud data path\nAirplane-mode workout monitoring] -. constraints .-> A
+    A -. no automatic personal-data export .-x G[GitHub / Google Drive]
 ```
+
+Real Gym Buddy personal data stays on the Android device. GitHub contains code/tests/synthetic fixtures; Google Drive contains specs/reports/builds without real telemetry or health records.
 
 ## 2. Android Component Architecture
 
@@ -52,7 +55,6 @@ flowchart LR
 classDiagram
     class UserProfile {
       +heightCm
-      +currentWeightKg
       +preferredUnits
     }
 
@@ -86,6 +88,16 @@ classDiagram
       +preWorkoutCarbsG
       +waterMl
       +sodiumMg
+      +sleepMinutes
+      +sleepQuality
+    }
+
+    class WeeklyBodyComposition {
+      +weekStart
+      +weightKg
+      +bodyFatPct
+      +aggregation
+      +sourceSummary
     }
 
     class HealthSample {
@@ -160,6 +172,7 @@ classDiagram
     TrainingPlan "1" --> "many" ExerciseDefinition
     UserProfile "1" --> "many" CalibrationProfile
     UserProfile "1" --> "many" DailyContext
+    UserProfile "1" --> "many" WeeklyBodyComposition
     DailyContext "1" --> "many" HealthSample
     DailyContext "1" --> "many" WorkoutSession
     ExerciseDefinition "1" --> "many" WorkoutSession
@@ -172,7 +185,7 @@ classDiagram
     Rep "1" --> "many" FormEvent
 ```
 
-**Important correction:** telemetry belongs to the set and may optionally reference a rep. This preserves setup, between-rep movement, partial/failed reps, and tracking-loss periods.
+Telemetry belongs to the set and may optionally reference a rep. Weight/body-fat are not retained daily in Gym Buddy: consolidate valid measurements into one `WeeklyBodyComposition` snapshot, preferably using the weekly median.
 
 ## 4. Live Workout Analysis Sequence
 
@@ -223,10 +236,12 @@ sequenceDiagram
     G->>HC: Read permitted date range
     HC-->>G: sleep / weight / body fat / HR / steps
     G->>G: normalize while preserving source + timestamps
-    G->>DB: cache DailyContext + HealthSamples
+    G->>DB: cache only what Gym Buddy needs
+    G->>G: weekly consolidate weight/body-fat
+    G->>DB: store WeeklyBodyComposition
 
     Note over G,DB: Health Connect is never in the realtime camera critical path.
-    Note over G,DB: Missing/stale/denied health data must not block workout coaching.
+    Note over G,DB: Fine-grained Health Connect history should not be duplicated permanently.
 ```
 
 ## 6. Realtime Processing Pipeline
@@ -257,19 +272,34 @@ Normalization owns rotation, mirroring, left/right body identity, coordinate spa
 flowchart TD
     F[Camera Frame] --> P[Pose Inference]
     F -->|debug mode only| V[Debug Video]
-    F -->|default| D1[Discard raw frame]
-    P --> T[Telemetry Samples]
-    T --> DB[(Room / SQLite)]
-    M[Rep Metrics] --> DB
-    E[Form Events + Evidence] --> DB
-    TE[Tracking Events] --> DB
-    H[Health Context Cache] --> DB
-    V --> LF[Local File Storage]
-
-    T -. bounded retention / downsampling .-> DB
+    F -->|default| D1[Discard immediately]
+    P --> T[High-frequency Telemetry]
+    T -->|7 days| DB[(Room / SQLite)]
+    TE[Tracking / Calibration Debug Events] -->|7 days| DB
+    M[Rep Metrics] -->|long-term| DB
+    E[Form Events + Evidence] -->|long-term| DB
+    S[Daily Sleep / Nutrition Summary] -->|long-term| DB
+    W[Weekly Body Composition] -->|long-term| DB
+    H[Fine-grained Health Connect Records] -->|temporary cache only| DB
+    V -->|max 7 days| LF[App-private no-backup storage]
 ```
 
-Default retention policy: raw camera frames are discarded; debug video is explicit opt-in only; small rep metrics/form events are long-term; high-frequency telemetry must use bounded retention, downsampling, or compaction.
+### Retention policy
+
+| Data | Retention |
+|---|---|
+| Raw camera frame | discard immediately |
+| High-frequency pose/movement telemetry | 7 days |
+| Tracking/calibration debug events | 7 days |
+| Debug video | OFF by default; max 7 days if enabled |
+| Compact/downsampled rep trace | long-term if useful |
+| Rep metrics / form events / rule evidence | long-term |
+| Set/workout summaries | long-term |
+| Sleep/nutrition summaries | long-term |
+| Weight/body fat | one weekly snapshot; prefer weekly median |
+| Fine-grained Health Connect history | do not permanently duplicate |
+
+Android cloud backup of Gym Buddy personal data must be disabled. Debug media stays in app-private/no-backup storage unless explicitly exported by the user.
 
 ## MVP Scope
 
@@ -295,13 +325,16 @@ Initial signals: rep count; exercise-specific phases; ROM; tempo; left/right sym
 ## Architectural Invariants
 
 - Android only, one user.
+- Real personal data stays on the Android device only.
 - Local-first and airplane-mode capable for workout monitoring.
-- No backend, LLM, login, or automatic video upload.
+- No backend, LLM, login, or Gym Buddy cloud data path.
+- Android backup/cloud backup of Gym Buddy personal data is disabled.
+- Debug media remains app-private/no-backup unless explicitly exported.
 - Exercise selection is manual.
 - ML is perception only; reasoning is deterministic code.
 - Tracking quality can veto analysis.
 - Exercise analyzers own exercise-specific state machines.
 - Cue arbitration prevents voice spam.
-- Telemetry and algorithm provenance are retained so old sessions can be re-analyzed.
-- Health samples retain provenance and timestamps.
-- Personal data never belongs in GitHub; only synthetic/anonymized fixtures may be committed.
+- Raw/high-frequency debugging data has a 7-day window; compact historical data is retained long-term.
+- Weight/body-fat is stored weekly, not daily.
+- GitHub and Google Drive never contain real Gym Buddy personal data.
