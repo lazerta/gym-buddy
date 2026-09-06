@@ -5,7 +5,6 @@ hide methods
 
 class UserProfile {
   heightCm: Double
-  currentWeightKg: Double?
   preferredUnits: String
 }
 
@@ -40,6 +39,17 @@ class DailyContext {
   preWorkoutCarbsG: Double?
   waterMl: Int?
   sodiumMg: Int?
+  sleepMinutes: Int?
+  sleepQuality: Int?
+}
+
+class WeeklyBodyComposition {
+  weekStart: LocalDate
+  weightKg: Double?
+  bodyFatPct: Double?
+  aggregation: String
+  sourceSummary: String?
+  measuredAtRepresentative: Instant?
 }
 
 class HealthSample {
@@ -118,6 +128,7 @@ TrainingPlan "1" -- "1..*" ExerciseDefinition
 UserProfile "1" -- "0..*" CalibrationProfile
 ExerciseDefinition "1" -- "0..*" CalibrationProfile
 UserProfile "1" -- "0..*" DailyContext
+UserProfile "1" -- "0..*" WeeklyBodyComposition
 DailyContext "1" *-- "0..*" HealthSample
 DailyContext "1" -- "0..*" WorkoutSession : contextualizes >
 ExerciseDefinition "1" -- "0..*" WorkoutSession
@@ -131,9 +142,15 @@ Rep "1" *-- "0..*" FormEvent
 
 note right of TelemetrySample
 Telemetry belongs to the set, not only to a Rep.
+Retain high-frequency samples for 7 days only.
 This preserves setup, between-rep motion, partial reps,
-failed reps, and tracking-loss periods.
-Raw video is not persisted by default.
+failed reps, and tracking-loss periods for short-term debugging.
+end note
+
+note right of WeeklyBodyComposition
+Store one compact snapshot per week.
+Prefer weekly median of valid weight/body-fat measurements.
+Do not retain every daily body-composition reading in Gym Buddy.
 end note
 
 note right of FormEvent
@@ -143,13 +160,13 @@ exact observed evidence, and cue.
 end note
 
 note right of WorkoutSession
-Persist provenance so historical telemetry
-can be re-analyzed after algorithms change.
+Persist provenance so historical compact data
+can be interpreted after algorithms change.
 end note
 
 note right of HealthSample
-Keep source + measurement time + sync time.
-Multiple Health Connect writers may overlap.
+Keep source + measurement time + sync time while cached.
+Avoid permanent duplication of fine-grained Health Connect history.
 end note
 
 @enduml
