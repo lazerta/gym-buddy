@@ -71,6 +71,7 @@ class DailyContext {
 class DailyHealthSummary {
   date: LocalDate
   aggregationVersion: Int
+  computedAt: Instant
   sleepMinutes: Int?
   sleepQuality: Int?
   restingHeartRateBpm: Double?
@@ -82,6 +83,7 @@ class DailyHealthSummary {
 class WeeklyBodyComposition {
   weekStart: LocalDate
   aggregationVersion: Int
+  computedAt: Instant
   medianWeightKg: Double?
   weightSampleCount: Int
   medianBodyFatPct: Double?
@@ -171,6 +173,7 @@ class FormEvent {
   severity: Severity
   confidence: Double
   startedAtElapsedNanos: Long
+  lastUpdatedAtElapsedNanos: Long
   endedAtElapsedNanos: Long?
 }
 
@@ -232,16 +235,26 @@ FormEvent "1" *-- "0..*" CueDelivery
 Rep "1" *-- "0..1" CompactRepTrace
 CompactRepTrace "1" *-- "1..*" TraceChannel
 
+note right of TrainingPlan
+A published plan version is immutable once referenced by a workout.
+Editing the plan creates a new version rather than mutating history.
+end note
+
 note right of PlannedSet
 targetLoadPct is not meaningful without a basis.
 Store loadPercentBasis when known; leave it null when the
 source plan does not define the denominator rather than guessing.
 end note
 
+note right of CalibrationProfile
+Calibration profiles are immutable/versioned once used.
+ExerciseExecution snapshots both calibrationProfileId and version.
+end note
+
 note right of ExerciseExecution
 pipelineVersion covers shared deterministic normalization/smoothing/
 quality-gate semantics. Exercise-specific analyzer/metric/cue-policy
-versions are also snapshotted. Store both calibration profile id + version.
+versions are also snapshotted.
 end note
 
 note right of ExerciseSet
@@ -265,8 +278,8 @@ Storage is best-effort and may contain gaps under pressure.
 end note
 
 note right of DailyHealthSummary
-aggregationVersion preserves the meaning of compact summaries if
-Health Connect dedupe/aggregation logic changes later.
+aggregationVersion + computedAt preserve summary meaning if
+Health Connect dedupe/aggregation logic changes or late data arrives.
 end note
 
 note right of FormEvent
@@ -274,6 +287,7 @@ One continuous detected issue is one stateful episode, not one row/frame.
 Typical lifecycle: PENDING in memory -> ACTIVE when persistence threshold
 is met -> FINALIZED when cleared, rep/set ends, or analyzer resets.
 Persist activation/finalization using the same FormEvent id.
+On crash, durable ACTIVE events become INTERRUPTED during startup recovery.
 CueDelivery remains a separate child and may be absent.
 end note
 
