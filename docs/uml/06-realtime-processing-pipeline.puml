@@ -1,0 +1,57 @@
+@startuml
+!theme plain
+skinparam shadowing false
+left to right direction
+
+rectangle "CameraX" as Camera
+rectangle "Frame Scheduler" as Scheduler
+rectangle "MediaPipe Pose" as Pose
+rectangle "Coordinate Normalizer" as Normalize
+rectangle "Landmark Smoother" as Smooth
+rectangle "Tracking Quality Gate" as Gate
+rectangle "Exercise Analyzer" as Analyzer
+rectangle "Biomechanics Metrics" as Metrics
+rectangle "Deterministic Rules" as Rules
+rectangle "Cue Arbitrator" as Cue
+rectangle "Overlay / TTS" as Output
+rectangle "Local Persistence" as Persist
+
+Camera --> Scheduler : frame + monotonic timestamp
+Scheduler --> Pose : newest eligible frame only
+Pose --> Normalize : landmarks + visibility/presence
+Normalize --> Smooth : canonical L/R + coordinate space
+Smooth --> Gate : MovementFrame
+Gate --> Analyzer : valid tracking only
+Gate --> Output : setup/tracking guidance
+Analyzer --> Metrics : phase + temporal state
+Metrics --> Rules : metrics + confidence
+Rules --> Cue : candidate FormEvents
+Cue --> Output : one prioritized actionable cue
+Analyzer --> Persist : rep boundaries / telemetry
+Metrics --> Persist : measurements
+Rules --> Persist : evidence / FormEvents
+
+note bottom of Scheduler
+Backpressure rule:
+never build an unbounded frame queue.
+Drop stale frames to protect latency.
+end note
+
+note bottom of Normalize
+Normalize rotation, mirroring, coordinate spaces,
+body side labels, timestamps and units
+before exercise-specific reasoning.
+end note
+
+note bottom of Gate
+Reject analysis when required landmarks are missing,
+tracking confidence is low, camera view is unsuitable,
+or temporal discontinuity is detected.
+end note
+
+note bottom of Cue
+Policy considers severity, actionability, persistence,
+priority, cooldown, repeated cues, and per-rep/set limits.
+end note
+
+@enduml
