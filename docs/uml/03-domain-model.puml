@@ -6,6 +6,8 @@ hide methods
 class UserProfile {
   heightCm: Double
   preferredUnits: String
+  activeTrainingPlanId: String?
+  activeTrainingPlanVersion: Int?
 }
 
 class TrainingPlan {
@@ -25,9 +27,17 @@ class PlannedExercise {
   id: String
   exerciseId: String
   order: Int
-  targetSets: Int
-  repRangeMin: Int?
-  repRangeMax: Int?
+  notes: String?
+}
+
+class PlannedSet {
+  id: String
+  setNumber: Int
+  targetLoadPct: Double?
+  repsMin: Int?
+  repsMax: Int?
+  rirMin: Int?
+  rirMax: Int?
 }
 
 class ExerciseDefinition {
@@ -80,6 +90,8 @@ class WorkoutSession {
   id: UUID
   startedAt: Instant
   endedAt: Instant?
+  trainingPlanId: String?
+  trainingPlanVersion: Int?
   appBuild: String
   poseModelVersion: String
 }
@@ -87,6 +99,7 @@ class WorkoutSession {
 class ExerciseExecution {
   id: UUID
   exerciseId: String
+  plannedExerciseId: String?
   order: Int
   startedAt: Instant
   endedAt: Instant?
@@ -97,21 +110,22 @@ class ExerciseExecution {
 
 class ExerciseSet {
   id: UUID
+  plannedSetId: String?
   setNumber: Int
-  load: Double?
+  loadKg: Double?
   targetReps: Int?
 }
 
 class Rep {
   id: UUID
   repNumber: Int
-  startedAtMs: Long
-  endedAtMs: Long
+  startedAtElapsedNanos: Long
+  endedAtElapsedNanos: Long
   completionState: String
 }
 
 class TelemetrySample {
-  timestampMs: Long
+  elapsedRealtimeNanos: Long
   repId: UUID?
   phase: String?
   landmarks: PoseLandmark[]
@@ -119,7 +133,7 @@ class TelemetrySample {
 }
 
 class TrackingEvent {
-  timestampMs: Long
+  elapsedRealtimeNanos: Long
   type: String
   severity: Severity
   details: String?
@@ -138,27 +152,30 @@ class FormEvent {
   ruleVersion: Int
   severity: Severity
   confidence: Double
-  startedAtMs: Long
-  endedAtMs: Long
+  startedAtElapsedNanos: Long
+  endedAtElapsedNanos: Long
   evidenceJson: String
   cue: String
 }
 
 class CompactRepTrace {
   traceVersion: Int
+  schemaId: String
   pointCount: Int
   normalizedTime: Float[]
-  leftElbowAngle: Float[]
-  rightElbowAngle: Float[]
-  leftWristX: Float[]
-  leftWristY: Float[]
-  rightWristX: Float[]
-  rightWristY: Float[]
 }
 
-UserProfile "1" -- "1" TrainingPlan
+class TraceChannel {
+  name: String
+  unit: String
+  side: String?
+  values: Float[]
+}
+
+UserProfile "1" -- "0..*" TrainingPlan
 TrainingPlan "1" *-- "1..*" TrainingDay
 TrainingDay "1" *-- "1..*" PlannedExercise
+PlannedExercise "1" *-- "1..*" PlannedSet
 PlannedExercise "0..*" --> "1" ExerciseDefinition : references >
 UserProfile "1" -- "0..*" CalibrationProfile
 ExerciseDefinition "1" -- "0..*" CalibrationProfile
@@ -168,9 +185,9 @@ UserProfile "1" -- "0..*" WeeklyBodyComposition
 UserProfile "1" -- "0..*" WorkoutSession
 WorkoutSession "0..*" --> "0..1" DailyContext : optional nutrition context >
 WorkoutSession "0..*" --> "0..1" DailyHealthSummary : optional health context >
-WorkoutSession "1" *-- "1..*" ExerciseExecution
+WorkoutSession "1" *-- "0..*" ExerciseExecution
 ExerciseExecution "0..*" --> "1" ExerciseDefinition : executes >
-ExerciseExecution "1" *-- "1..*" ExerciseSet
+ExerciseExecution "1" *-- "0..*" ExerciseSet
 ExerciseSet "1" *-- "0..*" TelemetrySample
 ExerciseSet "1" *-- "0..*" TrackingEvent
 ExerciseSet "1" *-- "0..*" Rep
@@ -178,26 +195,40 @@ Rep "0..1" <-- "0..*" TelemetrySample : optional repId
 Rep "1" *-- "0..*" RepMetric
 Rep "1" *-- "0..*" FormEvent
 Rep "1" *-- "0..1" CompactRepTrace
+CompactRepTrace "1" *-- "1..*" TraceChannel
+
+note right of TrainingPlan
+Keep plan versions as immutable definitions.
+UserProfile points to the active plan/version.
+WorkoutSession snapshots the plan id/version used that day.
+end note
+
+note right of PlannedSet
+Supports per-set targets such as different loading %, rep ranges,
+and RIR targets. This can represent pyramid/working-set schemes
+without hard-coding them into analyzer logic.
+end note
 
 note right of ExerciseExecution
 Exercise-specific provenance belongs here,
 not on WorkoutSession.
 One workout may contain many exercises using
 different analyzers/calibrations.
+plannedExerciseId is optional for ad-hoc exercises.
 end note
 
 note right of TelemetrySample
-Telemetry belongs to the set, not only to a Rep.
-Retain high-frequency samples for 7 days only.
-Setup, partial reps and tracking loss remain debuggable
-without forcing them into a completed Rep.
+Realtime durations use monotonic elapsed-time timestamps,
+not wall-clock time. Retain high-frequency samples for 7 days only.
+Telemetry belongs to the set and may optionally reference a Rep.
 end note
 
 note right of CompactRepTrace
-Long-term compact replay artifact.
+Generic long-term compact replay artifact.
+schemaId + TraceChannel[] allow exercise-specific signals
+without hard-coding press-only elbow/wrist fields.
 Use a fixed small number of normalized points per rep.
-Full-fidelity re-analysis is limited to the 7-day telemetry window;
-older sessions support compact/metric-level reinterpretation only.
+Full-fidelity re-analysis is limited to the 7-day telemetry window.
 end note
 
 note right of DailyHealthSummary
