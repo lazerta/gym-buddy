@@ -28,13 +28,14 @@ Gate --> Analyzer : valid tracking only
 Gate --> Output : setup/tracking guidance
 Analyzer --> Metrics : phase + temporal state
 Metrics --> Rules : metrics + confidence
-Rules --> Cue : candidate FormEvents
-Cue --> Output : one prioritized actionable cue
+Rules --> Cue : FormEvent + FormEvidence[]
+Cue --> Output : selected actionable cue
 
-Analyzer --> TelemetryQ : raw telemetry / transient debug events
+Analyzer --> TelemetryQ : raw telemetry / transient debug data
 Analyzer --> DurableQ : completed rep summary / CompactRepTrace
 Metrics --> DurableQ : final rep metrics
-Rules --> DurableQ : evidence / FormEvents
+Rules --> DurableQ : FormEvent + structured evidence
+Cue --> DurableQ : CueDelivery only when feedback is delivered
 DurableQ --> Writer : persist first
 TelemetryQ --> Writer : best-effort batches
 Writer --> Room : transactions
@@ -58,8 +59,9 @@ or temporal discontinuity is detected.
 end note
 
 note bottom of Cue
-Policy considers severity, actionability, persistence,
-priority, cooldown, repeated cues, and per-rep/set limits.
+Cue arbitration and rule detection are separate.
+A detected FormEvent can be suppressed from feedback.
+Only actual visual/TTS feedback creates CueDelivery.
 TTS is offline-voice-only; otherwise visual feedback remains.
 end note
 
@@ -69,8 +71,8 @@ Storage pressure must never stall live coaching.
 end note
 
 note bottom of DurableQ
-Durable rep summaries, compact traces, metrics and events
-use a separate priority lane with reserved capacity.
+Durable rep summaries, compact traces, metrics,
+structured FormEvidence and CueDelivery use a separate priority lane.
 Drain durable work before telemetry.
 end note
 
