@@ -6,51 +6,82 @@ autonumber
 actor Shawn
 participant "WorkoutScreen" as UI
 participant "CameraX" as Camera
+participant "LatestFrameScheduler" as Scheduler
 participant "MediaPipe Pose" as Pose
+participant "CoordinateNormalizer" as Normalize
 participant "SignalProcessor" as Signal
+participant "TrackingQualityGate" as Gate
 participant "InclineDbPressAnalyzer" as Analyzer
-participant "RepStateMachine" as RepSM
 participant "BiomechanicsMetrics" as Metrics
 participant "RuleEngine" as Rules
-participant "CueEngine" as Cue
+participant "CueArbitrator" as Cue
+queue "TelemetryBuffer" as Buffer
+participant "BatchWriter" as Writer
 participant "WorkoutRepository" as Repo
+database "Room / SQLite" as DB
 
 Shawn -> UI : select Incline Dumbbell Press
 Shawn -> UI : Start Set
 UI -> Camera : start analysis stream
 
-loop each analyzed frame
-  Camera -> Pose : ImageProxy + timestamp
-  Pose --> Signal : landmarks + confidence
-  Signal --> Analyzer : smoothed landmarks
-  Analyzer -> RepSM : update(frame)
-  RepSM --> Analyzer : rep phase + transition
-  Analyzer -> Metrics : calculate(frame, phase)
-  Metrics --> Analyzer : angles / ROM / path / symmetry
-  Analyzer -> Rules : evaluate(metrics, phase, history)
-  Rules --> Analyzer : FormEvent[]
-  Analyzer --> UI : overlay state
-  Analyzer -> Repo : append telemetry
+loop each camera frame
+  Camera -> Scheduler : ImageProxy + monotonic timestamp
+  Scheduler -> Pose : newest eligible frame only
+  Pose --> Normalize : landmarks + visibility / presence
+  Normalize --> Signal : canonical coordinates + body side
+  Signal --> Gate : smoothed MovementFrame
 
-  alt actionable persistent issue and cue cooldown expired
-    Analyzer -> Cue : emit short correction
-    Cue --> UI : visual cue
-    Cue -> Cue : Android TTS
+  alt tracking/calibration invalid
+    Gate --> UI : setup / visibility guidance
+  else valid
+    Gate --> Analyzer : valid MovementFrame
+    Analyzer -> Analyzer : update exercise-specific rep state
+    Analyzer -> Metrics : calculate(frame, phase)
+    Metrics --> Analyzer : ROM / angles / path / symmetry / tempo
+    Analyzer -> Rules : evaluate(metrics, phase, recent history)
+    Rules --> Cue : candidate FormEvents
+    Cue --> UI : max one prioritized actionable cue
+
+    Analyzer -> Buffer : offer telemetry + rep transitions
+    Metrics -> Buffer : offer metrics + compact trace points
+    Rules -> Buffer : offer evidence + FormEvents
+
+    alt rep completed
+      Analyzer --> UI : increment rep count
+      Analyzer -> Buffer : durable rep summary / trace finalization
+    end
   end
+end
 
-  alt rep completed
-    Analyzer -> Repo : persist rep summary + metrics + events
-    Analyzer --> UI : increment rep count
+par asynchronous persistence outside realtime path
+  loop while buffered items exist
+    Buffer -> Writer : drain bounded batch
+    Writer -> Repo : persist batch
+    Repo -> DB : transaction
   end
 end
 
 Shawn -> UI : Stop Set
 UI -> Camera : stop stream
-UI -> Repo : close set
+UI -> Buffer : finalize current set
+Buffer -> Writer : flush durable summary items
+Writer -> Repo : close exercise set / execution state
+Repo -> DB : commit
 
-note over Rules,Cue
+note over Scheduler,Pose
+Stale camera frames are dropped rather than queued.
+end note
+
+note over Gate,Cue
 A single noisy frame must never trigger coaching.
-Use confidence + persistence + severity + cooldown.
+Quality gate + confidence + persistence + severity + cooldown apply.
+end note
+
+note over Buffer,Writer
+Persistence is not part of the coaching critical path.
+The buffer is bounded and non-blocking.
+If overloaded, drop raw high-frequency telemetry first;
+never delay live coaching or durable rep/event summaries.
 end note
 
 @enduml
