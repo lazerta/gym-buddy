@@ -34,6 +34,7 @@ class PlannedSet {
   id: String
   setNumber: Int
   targetLoadPct: Double?
+  loadPercentBasis: String?
   repsMin: Int?
   repsMax: Int?
   rirMin: Int?
@@ -114,6 +115,9 @@ class ExerciseSet {
   setNumber: Int
   loadKg: Double?
   targetReps: Int?
+  startedAt: Instant
+  endedAt: Instant?
+  telemetryExpiresAt: Instant?
 }
 
 class Rep {
@@ -148,14 +152,29 @@ class RepMetric {
 }
 
 class FormEvent {
+  id: UUID
   ruleId: String
   ruleVersion: Int
   severity: Severity
   confidence: Double
   startedAtElapsedNanos: Long
   endedAtElapsedNanos: Long
-  evidenceJson: String
-  cue: String
+}
+
+class FormEvidence {
+  key: String
+  observedValue: Double?
+  unit: String?
+  comparator: String?
+  thresholdValue: Double?
+  textValue: String?
+}
+
+class CueDelivery {
+  id: UUID
+  deliveredAtElapsedNanos: Long
+  channel: String
+  message: String
 }
 
 class CompactRepTrace {
@@ -194,6 +213,8 @@ ExerciseSet "1" *-- "0..*" Rep
 Rep "0..1" <-- "0..*" TelemetrySample : optional repId
 Rep "1" *-- "0..*" RepMetric
 Rep "1" *-- "0..*" FormEvent
+FormEvent "1" *-- "1..*" FormEvidence
+FormEvent "1" *-- "0..*" CueDelivery
 Rep "1" *-- "0..1" CompactRepTrace
 CompactRepTrace "1" *-- "1..*" TraceChannel
 
@@ -204,17 +225,16 @@ WorkoutSession snapshots the plan id/version used that day.
 end note
 
 note right of PlannedSet
-Supports per-set targets such as different loading %, rep ranges,
-and RIR targets. This can represent pyramid/working-set schemes
-without hard-coding them into analyzer logic.
+targetLoadPct is not meaningful without a basis.
+Store loadPercentBasis when known; leave it null when the
+source plan does not define the denominator rather than guessing.
+Supports per-set rep and RIR targets.
 end note
 
-note right of ExerciseExecution
-Exercise-specific provenance belongs here,
-not on WorkoutSession.
-One workout may contain many exercises using
-different analyzers/calibrations.
-plannedExerciseId is optional for ad-hoc exercises.
+note right of ExerciseSet
+Use wall-clock startedAt/endedAt for history and retention.
+Set telemetryExpiresAt when the set closes (normally end + 7 days).
+RetentionWorker deletes short-lived children using this anchor.
 end note
 
 note right of TelemetrySample
@@ -225,28 +245,26 @@ end note
 
 note right of CompactRepTrace
 Generic long-term compact replay artifact.
-schemaId + TraceChannel[] allow exercise-specific signals
-without hard-coding press-only elbow/wrist fields.
+schemaId + TraceChannel[] allow exercise-specific signals.
 Use a fixed small number of normalized points per rep.
 Full-fidelity re-analysis is limited to the 7-day telemetry window.
+end note
+
+note right of FormEvent
+FormEvent means a persisted detected issue, not necessarily a spoken cue.
+Evidence is structured as FormEvidence[] instead of opaque JSON.
+end note
+
+note right of CueDelivery
+Persist only cues actually delivered to the user.
+A FormEvent may be suppressed by CueArbitrator and have zero deliveries.
+channel distinguishes VISUAL / TTS if needed.
 end note
 
 note right of DailyHealthSummary
 Aggregate Health Connect records locally.
 Do not persist fine-grained HR/step/source records long-term.
 Missing health data never blocks workout tracking.
-end note
-
-note right of WeeklyBodyComposition
-One compact snapshot per week.
-Prefer medians of valid measurements and retain sample counts.
-Do not retain every daily weight/body-fat reading in Gym Buddy.
-end note
-
-note right of FormEvent
-Never store only a score.
-Persist rule id/version, confidence,
-exact observed evidence, and cue.
 end note
 
 @enduml
