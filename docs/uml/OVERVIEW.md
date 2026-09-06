@@ -1,6 +1,6 @@
 # Gym Buddy UML Overview v0.7
 
-Final architecture review candidate for a single-user, local-first Android biomechanics coach.
+**ARCHITECTURE FROZEN.** Fifth review result: **P0 = 0, P1 = 0**. Remaining decisions belong to SPEC/tests/implementation.
 
 ## 1. System Context
 
