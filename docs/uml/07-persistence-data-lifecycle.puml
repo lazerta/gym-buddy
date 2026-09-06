@@ -4,49 +4,63 @@ skinparam shadowing false
 
 rectangle "Camera Frame" as Frame
 rectangle "Pose / Movement Telemetry" as Telemetry
+rectangle "Tracking / Calibration Debug Events" as Tracking
 rectangle "Rep Metrics" as Metrics
 rectangle "Form Events + Rule Evidence" as Events
-rectangle "Tracking / Calibration Debug Events" as Tracking
-rectangle "Daily Sleep / Nutrition Summary" as Daily
-rectangle "Weekly Body Composition\n(weight + body fat)" as Weekly
-rectangle "Health Connect Fine-grained Records" as Health
-rectangle "Debug Video\n(opt-in only)" as Video
-rectangle "Room / SQLite" as Room
+rectangle "CompactRepTrace\nnormalized small rep trace" as CompactTrace
+rectangle "Daily Nutrition Context" as Nutrition
+rectangle "DailyHealthSummary" as DailyHealth
+rectangle "WeeklyBodyComposition" as Weekly
+rectangle "Health Connect Fine-grained Records\nprocessing input only" as Health
+rectangle "Health Aggregator\nin-memory" as HealthAgg
+rectangle "Debug Video\nopt-in only" as Video
+rectangle "Telemetry Buffer\nbounded" as Buffer
+rectangle "Batch Writer" as Writer
+database "Room / SQLite" as Room
 rectangle "App-private no-backup storage" as Files
 
 Frame --> Telemetry : infer pose
-Frame --> Video : only in explicit debug mode
+Frame --> Video : explicit debug mode only
 Frame --> Frame : discard immediately after processing
-Telemetry --> Room : retain 7 days
-Tracking --> Room : retain 7 days
-Metrics --> Room : long-term
-Events --> Room : long-term
-Daily --> Room : long-term compact summary
-Weekly --> Room : long-term weekly snapshot
-Health --> Room : temporary / normalized cache only
+Telemetry --> Buffer : best-effort raw samples
+Tracking --> Buffer : short-term debug events
+Metrics --> Buffer : durable derived metrics
+Events --> Buffer : durable evidence/events
+CompactTrace --> Buffer : durable compact trace
+Buffer --> Writer : asynchronous batches
+Writer --> Room
+
+Nutrition --> Room : long-term compact daily context
+Health --> HealthAgg : normalize / aggregate
+HealthAgg --> DailyHealth : daily compact summary
+HealthAgg --> Weekly : weekly medians + counts
+DailyHealth --> Room : long-term
+Weekly --> Room : long-term
+HealthAgg --> HealthAgg : discard fine-grained inputs
 Video --> Files : retain <= 7 days
 
 note right of Telemetry
 High-frequency raw movement telemetry is a short-term
-debug/re-analysis window only.
+full-fidelity debug/re-analysis window only.
 Delete after 7 days.
-Keep compact/downsampled rep traces only if useful long-term.
+end note
+
+note right of Tracking
+Retain tracking/calibration debug events for 7 days,
+then delete.
+end note
+
+note right of CompactTrace
+Retain long-term as a small standardized trace,
+for example a fixed number of normalized points per rep.
+This supports trend comparison and approximate reinterpretation
+after full telemetry has expired.
 end note
 
 note right of Weekly
 One snapshot per week.
-Prefer median of valid measurements from that week.
-Do not permanently copy every weight/body-fat reading.
-end note
-
-note right of Metrics
-Keep durable derived metrics because they are small
-and useful for longitudinal trend analysis.
-end note
-
-note right of Events
-Persist rule id/version and exact evidence
-so decisions remain explainable.
+Prefer medians of valid weight/body-fat measurements.
+Persist sample counts and source summary.
 end note
 
 note right of Video
@@ -54,6 +68,12 @@ OFF by default.
 App-private/no-backup storage only.
 Delete after at most 7 days.
 Manual export is the only allowed path out of the app sandbox.
+end note
+
+note bottom of Buffer
+Persistence is off the coaching critical path.
+Under pressure, raw telemetry may be dropped first;
+durable rep summaries/metrics/events must be prioritized.
 end note
 
 note bottom of Room
