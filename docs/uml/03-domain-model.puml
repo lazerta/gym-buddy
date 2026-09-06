@@ -5,17 +5,34 @@ hide methods
 
 class UserProfile {
   heightCm: Double
+  currentWeightKg: Double?
   preferredUnits: String
+}
+
+class TrainingPlan {
+  id: String
+  name: String
+  version: Int
+}
+
+class ExerciseDefinition {
+  id: String
+  displayName: String
+  analyzerType: String
+  defaultCameraView: String
+}
+
+class CalibrationProfile {
+  id: UUID
+  exerciseId: String
+  version: Int
+  createdAt: Instant
+  cameraView: String
+  baselineMetadata: String?
 }
 
 class DailyContext {
   date: LocalDate
-  bodyWeightKg: Double?
-  bodyFatPct: Double?
-  sleepMinutes: Int?
-  deepSleepMinutes: Int?
-  restingHeartRateBpm: Int?
-  steps: Int?
   caloriesKcal: Int?
   proteinG: Double?
   carbsG: Double?
@@ -25,11 +42,26 @@ class DailyContext {
   sodiumMg: Int?
 }
 
+class HealthSample {
+  sourceApp: String
+  sourceDevice: String?
+  type: HealthMetricType
+  value: Double
+  unit: String
+  measuredAt: Instant
+  lastSyncedAt: Instant
+}
+
 class WorkoutSession {
   id: UUID
   startedAt: Instant
   endedAt: Instant?
-  exerciseType: ExerciseType
+  exerciseId: String
+  appBuild: String
+  poseModelVersion: String
+  analyzerVersion: Int
+  metricVersion: Int
+  calibrationVersion: Int?
 }
 
 class ExerciseSet {
@@ -44,13 +76,22 @@ class Rep {
   repNumber: Int
   startedAtMs: Long
   endedAtMs: Long
-  qualityScore: Double?
+  completionState: String
 }
 
-class PoseSample {
+class TelemetrySample {
   timestampMs: Long
-  phase: RepPhase
+  repId: UUID?
+  phase: String?
   landmarks: PoseLandmark[]
+  trackingConfidence: Double
+}
+
+class TrackingEvent {
+  timestampMs: Long
+  type: String
+  severity: Severity
+  details: String?
 }
 
 class RepMetric {
@@ -58,6 +99,7 @@ class RepMetric {
   value: Double
   unit: String
   confidence: Double
+  metricVersion: Int
 }
 
 class FormEvent {
@@ -67,34 +109,47 @@ class FormEvent {
   confidence: Double
   startedAtMs: Long
   endedAtMs: Long
+  evidenceJson: String
   cue: String
 }
 
-class HealthSample {
-  source: String
-  type: HealthMetricType
-  value: Double
-  timestamp: Instant
-}
-
-UserProfile "1" -- "0..*" WorkoutSession
+UserProfile "1" -- "1" TrainingPlan
+TrainingPlan "1" -- "1..*" ExerciseDefinition
+UserProfile "1" -- "0..*" CalibrationProfile
+ExerciseDefinition "1" -- "0..*" CalibrationProfile
+UserProfile "1" -- "0..*" DailyContext
+DailyContext "1" *-- "0..*" HealthSample
 DailyContext "1" -- "0..*" WorkoutSession : contextualizes >
+ExerciseDefinition "1" -- "0..*" WorkoutSession
 WorkoutSession "1" *-- "1..*" ExerciseSet
-ExerciseSet "1" *-- "1..*" Rep
-Rep "1" *-- "0..*" PoseSample
+ExerciseSet "1" *-- "0..*" TelemetrySample
+ExerciseSet "1" *-- "0..*" TrackingEvent
+ExerciseSet "1" *-- "0..*" Rep
+Rep "0..1" <-- "0..*" TelemetrySample : optional repId
 Rep "1" *-- "0..*" RepMetric
 Rep "1" *-- "0..*" FormEvent
-DailyContext "1" *-- "0..*" HealthSample
 
-note right of PoseSample
-Raw video is not required to persist.
-Pose telemetry is the durable movement record.
+note right of TelemetrySample
+Telemetry belongs to the set, not only to a Rep.
+This preserves setup, between-rep motion, partial reps,
+failed reps, and tracking-loss periods.
+Raw video is not persisted by default.
 end note
 
 note right of FormEvent
 Never store only a score.
-Preserve rule id, version,
-measurements and confidence.
+Persist rule id/version, confidence,
+exact observed evidence, and cue.
+end note
+
+note right of WorkoutSession
+Persist provenance so historical telemetry
+can be re-analyzed after algorithms change.
+end note
+
+note right of HealthSample
+Keep source + measurement time + sync time.
+Multiple Health Connect writers may overlap.
 end note
 
 @enduml
