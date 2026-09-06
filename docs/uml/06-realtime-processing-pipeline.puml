@@ -15,7 +15,7 @@ rectangle "Deterministic Rules" as Rules
 rectangle "Cue Arbitrator" as Cue
 rectangle "Overlay / TTS" as Output
 queue "Telemetry Ring Buffer\nbounded / best-effort" as TelemetryQ
-queue "Durable Event Queue\nreserved priority lane" as DurableQ
+queue "Priority Persistence Queue\nbounded / reserved capacity" as PriorityQ
 rectangle "Batch Writer" as Writer
 database "Room / SQLite" as Room
 
@@ -28,52 +28,37 @@ Gate --> Analyzer : valid tracking only
 Gate --> Output : setup/tracking guidance
 Analyzer --> Metrics : phase + temporal state
 Metrics --> Rules : metrics + confidence
-Rules --> Cue : FormEvent + FormEvidence[]
+Rules --> Cue : set-scoped FormEvent + FormEvidence[]\noptional repId
 Cue --> Output : selected actionable cue
 
 Analyzer --> TelemetryQ : raw telemetry / transient debug data
-Analyzer --> DurableQ : completed rep summary / CompactRepTrace
-Metrics --> DurableQ : final rep metrics
-Rules --> DurableQ : FormEvent + structured evidence
-Cue --> DurableQ : CueDelivery only when feedback is delivered
-DurableQ --> Writer : persist first
+Analyzer --> PriorityQ : completed rep summary / CompactRepTrace
+Metrics --> PriorityQ : final rep metrics
+Rules --> PriorityQ : FormEvent + structured evidence
+Cue --> PriorityQ : CueDelivery only when delivered
+PriorityQ --> Writer : persist first
 TelemetryQ --> Writer : best-effort batches
 Writer --> Room : transactions
 
 note bottom of Scheduler
-Camera backpressure:
-never build an unbounded frame queue.
-Use newest eligible frames so latency stays bounded.
-end note
-
-note bottom of Normalize
-Normalize rotation, mirroring, coordinate spaces,
-body side labels, monotonic timestamps and units
-before exercise-specific reasoning.
+Use newest eligible frames; never let a camera backlog grow.
 end note
 
 note bottom of Gate
-Reject analysis when required landmarks are missing,
-tracking confidence is low, camera view is unsuitable,
-or temporal discontinuity is detected.
+Reject analysis for missing required landmarks, low confidence,
+unsuitable camera view, or temporal discontinuity.
 end note
 
 note bottom of Cue
-Cue arbitration and rule detection are separate.
-A detected FormEvent can be suppressed from feedback.
+A detected FormEvent may be suppressed from feedback.
 Only actual visual/TTS feedback creates CueDelivery.
-TTS is offline-voice-only; otherwise visual feedback remains.
+TTS is offline-voice-only.
 end note
 
-note bottom of TelemetryQ
-Short-lived telemetry is best-effort and bounded.
-Storage pressure must never stall live coaching.
-end note
-
-note bottom of DurableQ
-Durable rep summaries, compact traces, metrics,
-structured FormEvidence and CueDelivery use a separate priority lane.
-Drain durable work before telemetry.
+note bottom of PriorityQ
+PriorityPersistenceQueue is an in-memory scheduling lane.
+It is not durable by itself; Room commit creates durability.
+Keep it bounded with reserved capacity and drain before telemetry.
 end note
 
 @enduml
