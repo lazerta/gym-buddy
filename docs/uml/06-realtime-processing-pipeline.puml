@@ -14,7 +14,9 @@ rectangle "Biomechanics Metrics" as Metrics
 rectangle "Deterministic Rules" as Rules
 rectangle "Cue Arbitrator" as Cue
 rectangle "Overlay / TTS" as Output
-rectangle "Local Persistence" as Persist
+queue "Telemetry Buffer\nbounded / non-blocking" as Buffer
+rectangle "Batch Writer" as Writer
+database "Room / SQLite" as Room
 
 Camera --> Scheduler : frame + monotonic timestamp
 Scheduler --> Pose : newest eligible frame only
@@ -27,9 +29,12 @@ Analyzer --> Metrics : phase + temporal state
 Metrics --> Rules : metrics + confidence
 Rules --> Cue : candidate FormEvents
 Cue --> Output : one prioritized actionable cue
-Analyzer --> Persist : rep boundaries / telemetry
-Metrics --> Persist : measurements
-Rules --> Persist : evidence / FormEvents
+
+Analyzer --> Buffer : telemetry / rep transitions
+Metrics --> Buffer : metrics / compact trace points
+Rules --> Buffer : evidence / FormEvents
+Buffer --> Writer : asynchronous bounded batches
+Writer --> Room : transactions
 
 note bottom of Scheduler
 Backpressure rule:
@@ -52,6 +57,13 @@ end note
 note bottom of Cue
 Policy considers severity, actionability, persistence,
 priority, cooldown, repeated cues, and per-rep/set limits.
+end note
+
+note bottom of Buffer
+Storage is outside the realtime critical path.
+If the buffer is under pressure, discard oldest/raw telemetry first.
+Durable rep summaries, metrics and FormEvents have higher priority.
+Never stall live coaching waiting for Room.
 end note
 
 @enduml
