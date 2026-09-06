@@ -4,7 +4,7 @@ Architecture source of truth for the private-use, local-first Android biomechani
 
 ## Version
 
-**v0.2 — pre-implementation review baseline**
+**v0.3 — architecture freeze candidate**
 
 ## Diagrams
 
@@ -21,7 +21,7 @@ Architecture source of truth for the private-use, local-first Android biomechani
 - Workout monitoring is local-first and must work in airplane mode.
 - ML is restricted to perception. MediaPipe converts camera frames into landmarks; deterministic code owns movement interpretation and coaching decisions.
 - Health Connect is contextual input, never part of the realtime camera critical path.
-- No backend, LLM, account system, or cloud upload is required.
+- No backend, LLM, account system, or Gym Buddy cloud data path exists.
 - Exercise selection is explicit; the app does not spend complexity guessing the exercise.
 - Coordinate normalization happens before exercise-specific reasoning.
 - The realtime path uses bounded/latest-frame processing; stale frames must not accumulate.
@@ -29,6 +29,8 @@ Architecture source of truth for the private-use, local-first Android biomechani
 - Cue arbitration prevents multiple rules from spamming the user.
 - Persist structured telemetry, derived metrics, algorithm provenance and rule evidence rather than only opaque scores.
 - Raw video is not persisted by default.
+- Android backup/cloud backup of Gym Buddy personal data must be disabled.
+- Debug media must remain in app-private/no-backup storage unless the user explicitly exports it.
 
 ## Domain invariants
 
@@ -37,12 +39,28 @@ Architecture source of truth for the private-use, local-first Android biomechani
 - `ExerciseAnalyzer` behavior is exercise-specific; shared math/signal-processing infrastructure stays generic.
 - Historical results store `poseModelVersion`, `analyzerVersion`, `metricVersion`, `ruleVersion`, `calibrationVersion`, and app build provenance where relevant.
 - Health values retain source, measurement time and sync time so duplicates/stale values can be reconciled deterministically.
+- Weight/body-fat are consolidated into one `WeeklyBodyComposition` snapshot per week; prefer the weekly median of valid measurements.
+
+## Data retention policy
+
+- Raw camera frames: discard immediately after processing.
+- High-frequency pose/movement telemetry: retain **7 days**, then delete.
+- Tracking/calibration debug events: retain **7 days**, then delete.
+- Debug video: OFF by default; if explicitly enabled, keep at most **7 days** in app-private/no-backup storage.
+- Rep metrics, form events, rule evidence, set/workout summaries, and compact/downsampled rep traces: retain long-term.
+- Daily sleep/nutrition summaries may be retained long-term.
+- Weight/body-fat: retain only a weekly compact snapshot, preferably the weekly median.
+- Avoid duplicating fine-grained Health Connect history long-term when it can be queried from Health Connect directly.
 
 ## Privacy / repository boundary
 
-Do **not** commit personal health data, real telemetry exports, or workout recordings to this repository. Real user data belongs only in the local Android database or the private project Drive workspace. GitHub test fixtures must be synthetic or explicitly anonymized.
+Real personal data belongs **only on the Android device**.
 
-> Repository visibility is currently a separate operational concern. Until it is private, treat GitHub as public and commit no personal data.
+- GitHub: source code, architecture, tests, synthetic/anonymized fixtures only.
+- Google Drive: specs, architecture, reports without personal telemetry, and build artifacts only.
+- Android device: Health Connect cache, workout telemetry, metrics, form events, calibration, summaries, and optional debug media.
+
+Do **not** commit or upload real health data, telemetry exports, workout recordings, sleep/weight history, nutrition logs, or debug video to GitHub or Google Drive.
 
 ## MVP implementation target
 
