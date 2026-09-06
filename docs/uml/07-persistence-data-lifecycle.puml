@@ -3,7 +3,7 @@
 skinparam shadowing false
 
 rectangle "Camera Frame" as Frame
-rectangle "Pose / Movement Telemetry" as Telemetry
+rectangle "PoseObservation\nMediaPipe output only; no image bytes" as PoseObs
 rectangle "Tracking / Calibration Debug Events" as Tracking
 rectangle "Rep Metrics" as Metrics
 rectangle "Set-scoped FormEvent + FormEvidence[]\noptional repId" as Events
@@ -15,24 +15,25 @@ rectangle "WeeklyBodyComposition" as Weekly
 rectangle "Health Connect Fine-grained Records\nprocessing input only" as Health
 rectangle "Health Aggregator\nin-memory" as HealthAgg
 rectangle "Debug Video\nopt-in only" as Video
-queue "Telemetry Ring Buffer" as TelemetryQ
+queue "Short-lived Telemetry Buffer\nbest-effort" as TelemetryQ
 queue "Priority Persistence Queue" as PriorityQ
 rectangle "Batch Writer" as Writer
 rectangle "Retention Worker\nstartup + periodic" as Retention
+rectangle "Startup Recovery" as Recovery
 database "Room / SQLite" as Room
 rectangle "App-private no-backup storage" as Files
 
-Frame --> Telemetry : infer pose
+Frame --> PoseObs : pose inference output
 Frame --> Video : explicit debug mode only
 Frame --> Frame : discard immediately
-Telemetry --> TelemetryQ : best-effort short-lived samples
+PoseObs --> TelemetryQ : short-lived replay/debug input
 Tracking --> TelemetryQ : short-lived debug events
 Metrics --> PriorityQ : long-term derived metrics
 Events --> PriorityQ : structured detected issues
 CueDelivery --> PriorityQ : actual feedback record
 CompactTrace --> PriorityQ : long-term generic compact trace
 PriorityQ --> Writer : priority batches
-TelemetryQ --> Writer : best-effort batches
+TelemetryQ --> Writer : best-effort short-lived batches
 Writer --> Room
 
 Nutrition --> Room : long-term compact daily context
@@ -45,12 +46,17 @@ HealthAgg --> HealthAgg : discard fine-grained inputs
 Video --> Files : <= 7 days
 Retention --> Room : prune expired set-scoped short-lived data
 Retention --> Files : delete expired debug media
+Recovery --> Room : stale ACTIVE -> INTERRUPTED
 
-note right of Telemetry
-ExerciseSet.telemetryExpiresAt is non-null at set creation:
-fail-safe startedAt + 7 days.
-On normal close update to endedAt + 7 days.
-A crash cannot create immortal telemetry.
+note right of PoseObs
+Capture immediately after MediaPipe, before normalization/smoothing.
+This permits the best available recent replay of downstream code.
+The buffer is best-effort, so storage pressure may create gaps.
+end note
+
+note right of Tracking
+Emit meaningful state transitions rather than every bad frame.
+Tracking/calibration debug events share the set's short-lived expiry.
 end note
 
 note right of Events
@@ -67,16 +73,25 @@ end note
 note right of CompactTrace
 Keep a small generic standardized trace long-term.
 Use schemaId + typed channels for exercise-specific signals.
+This supports longitudinal reinterpretation, not full raw replay.
 end note
 
 note bottom of PriorityQ
 This queue prioritizes persistence but is not itself durable.
 Durability begins at successful Room commit.
+Normal Stop Set uses a SetCloseBarrier after earlier priority records.
 end note
 
 note bottom of Retention
-Expired short-lived data is excluded from normal reads at expiry.
-Startup/periodic jobs physically purge it later.
+Logical expiry occurs at ExerciseSet.telemetryExpiresAt.
+Expired short-lived rows are excluded from normal reads immediately.
+Physical deletion occurs on startup/periodic local cleanup.
+end note
+
+note bottom of Recovery
+If the process dies with ACTIVE workout/execution/set records,
+startup recovery marks them INTERRUPTED instead of treating them
+as an active workout forever.
 end note
 
 note bottom of Room
