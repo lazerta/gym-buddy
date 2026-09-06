@@ -6,7 +6,7 @@ rectangle "Camera Frame" as Frame
 rectangle "Pose / Movement Telemetry" as Telemetry
 rectangle "Tracking / Calibration Debug Events" as Tracking
 rectangle "Rep Metrics" as Metrics
-rectangle "FormEvent + FormEvidence[]" as Events
+rectangle "Set-scoped FormEvent + FormEvidence[]\noptional repId" as Events
 rectangle "CueDelivery\nactual feedback only" as CueDelivery
 rectangle "CompactRepTrace\n+ generic TraceChannel[]" as CompactTrace
 rectangle "Daily Nutrition Context" as Nutrition
@@ -16,7 +16,7 @@ rectangle "Health Connect Fine-grained Records\nprocessing input only" as Health
 rectangle "Health Aggregator\nin-memory" as HealthAgg
 rectangle "Debug Video\nopt-in only" as Video
 queue "Telemetry Ring Buffer" as TelemetryQ
-queue "Durable Event Queue" as DurableQ
+queue "Priority Persistence Queue" as PriorityQ
 rectangle "Batch Writer" as Writer
 rectangle "Retention Worker\nstartup + periodic" as Retention
 database "Room / SQLite" as Room
@@ -27,11 +27,11 @@ Frame --> Video : explicit debug mode only
 Frame --> Frame : discard immediately
 Telemetry --> TelemetryQ : best-effort short-lived samples
 Tracking --> TelemetryQ : short-lived debug events
-Metrics --> DurableQ : long-term derived metrics
-Events --> DurableQ : structured long-term rule evidence
-CueDelivery --> DurableQ : long-term actual feedback record
-CompactTrace --> DurableQ : long-term generic compact trace
-DurableQ --> Writer : priority batches
+Metrics --> PriorityQ : long-term derived metrics
+Events --> PriorityQ : structured detected issues
+CueDelivery --> PriorityQ : actual feedback record
+CompactTrace --> PriorityQ : long-term generic compact trace
+PriorityQ --> Writer : priority batches
 TelemetryQ --> Writer : best-effort batches
 Writer --> Room
 
@@ -43,19 +43,20 @@ DailyHealth --> Room : long-term
 Weekly --> Room : long-term
 HealthAgg --> HealthAgg : discard fine-grained inputs
 Video --> Files : <= 7 days
-Retention --> Room : prune sets whose telemetryExpiresAt passed
+Retention --> Room : prune expired set-scoped short-lived data
 Retention --> Files : delete expired debug media
 
 note right of Telemetry
-High-frequency movement telemetry is a short-term
-full-fidelity debug/re-analysis window only.
-ExerciseSet.telemetryExpiresAt is the purge anchor.
+ExerciseSet.telemetryExpiresAt is non-null at set creation:
+fail-safe startedAt + 7 days.
+On normal close update to endedAt + 7 days.
+A crash cannot create immortal telemetry.
 end note
 
 note right of Events
-FormEvent records a detected issue.
-FormEvidence[] stores structured observed/threshold facts.
-Do not use one opaque evidence JSON blob as the source of truth.
+FormEvent belongs to ExerciseSet and optionally references Rep.
+This preserves setup/top-position, partial-attempt, and
+unrecognized-rep issues while keeping evidence structured.
 end note
 
 note right of CueDelivery
@@ -64,27 +65,23 @@ Suppressed FormEvents have no CueDelivery.
 end note
 
 note right of CompactTrace
-Retain a small generic standardized trace long-term.
-Use schemaId + typed channels so every exercise can define
-its own compact signals without press-specific fields.
+Keep a small generic standardized trace long-term.
+Use schemaId + typed channels for exercise-specific signals.
 end note
 
-note right of Video
-OFF by default.
-App-private/no-backup storage only.
-MVP provides no personal-data export/share feature.
+note bottom of PriorityQ
+This queue prioritizes persistence but is not itself durable.
+Durability begins at successful Room commit.
 end note
 
 note bottom of Retention
-Run cleanup on app startup and periodically.
-Expired data is ineligible for normal reads at telemetryExpiresAt;
-physical purge follows through local cleanup jobs.
+Expired short-lived data is excluded from normal reads at expiry.
+Startup/periodic jobs physically purge it later.
 end note
 
 note bottom of Room
 Real personal data stays on-device only.
-Android cloud backup must be disabled.
-No automatic or user-facing personal-data export in MVP.
+Android cloud backup disabled; no export/share in MVP.
 end note
 
 @enduml
