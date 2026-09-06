@@ -1,0 +1,56 @@
+@startuml
+!theme plain
+skinparam shadowing false
+
+autonumber
+actor Shawn
+participant "WorkoutScreen" as UI
+participant "CameraX" as Camera
+participant "MediaPipe Pose" as Pose
+participant "SignalProcessor" as Signal
+participant "InclineDbPressAnalyzer" as Analyzer
+participant "RepStateMachine" as RepSM
+participant "BiomechanicsMetrics" as Metrics
+participant "RuleEngine" as Rules
+participant "CueEngine" as Cue
+participant "WorkoutRepository" as Repo
+
+Shawn -> UI : select Incline Dumbbell Press
+Shawn -> UI : Start Set
+UI -> Camera : start analysis stream
+
+loop each analyzed frame
+  Camera -> Pose : ImageProxy + timestamp
+  Pose --> Signal : landmarks + confidence
+  Signal --> Analyzer : smoothed landmarks
+  Analyzer -> RepSM : update(frame)
+  RepSM --> Analyzer : rep phase + transition
+  Analyzer -> Metrics : calculate(frame, phase)
+  Metrics --> Analyzer : angles / ROM / path / symmetry
+  Analyzer -> Rules : evaluate(metrics, phase, history)
+  Rules --> Analyzer : FormEvent[]
+  Analyzer --> UI : overlay state
+  Analyzer -> Repo : append telemetry
+
+  alt actionable persistent issue and cue cooldown expired
+    Analyzer -> Cue : emit short correction
+    Cue --> UI : visual cue
+    Cue -> Cue : Android TTS
+  end
+
+  alt rep completed
+    Analyzer -> Repo : persist rep summary + metrics + events
+    Analyzer --> UI : increment rep count
+  end
+end
+
+Shawn -> UI : Stop Set
+UI -> Camera : stop stream
+UI -> Repo : close set
+
+note over Rules,Cue
+A single noisy frame must never trigger coaching.
+Use confidence + persistence + severity + cooldown.
+end note
+
+@enduml
