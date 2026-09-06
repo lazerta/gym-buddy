@@ -1,6 +1,6 @@
-# Gym Buddy UML Overview v0.5
+# Gym Buddy UML Overview v0.6
 
-Final review candidate for a single-user, local-first Android biomechanics coach.
+Final architecture review candidate for a single-user, local-first Android biomechanics coach.
 
 ## 1. System Context
 
@@ -46,6 +46,7 @@ flowchart LR
     ANA --> DQ[Durable Event Queue\nPriority]
     MET --> DQ
     RULES --> DQ
+    CUE --> DQ
     DQ --> BW[Async BatchWriter]
     TQ --> BW
     BW --> REPO[Workout Repository]
@@ -57,7 +58,7 @@ flowchart LR
     RW --> FILES[App-private no-backup files]
 ```
 
-**Key rules:** stale camera frames are dropped; invalid tracking blocks analysis; storage is off the realtime path; durable summaries/events have a dedicated priority lane; retention cleanup runs at startup and periodically.
+**Key rules:** stale frames are dropped; invalid tracking blocks analysis; storage is off the realtime path; durable records use a separate priority lane; retention cleanup runs at startup and periodically.
 
 ## 3. Domain / Data Model
 
@@ -87,6 +88,7 @@ classDiagram
     class PlannedSet {
       +setNumber
       +targetLoadPct
+      +loadPercentBasis
       +repsMin
       +repsMax
       +rirMin
@@ -152,6 +154,9 @@ classDiagram
       +setNumber
       +loadKg
       +targetReps
+      +startedAt
+      +endedAt
+      +telemetryExpiresAt
     }
     class Rep {
       +repNumber
@@ -179,12 +184,26 @@ classDiagram
       +metricVersion
     }
     class FormEvent {
+      +id
       +ruleId
       +ruleVersion
       +severity
       +confidence
-      +evidenceJson
-      +cue
+      +startedAtElapsedNanos
+      +endedAtElapsedNanos
+    }
+    class FormEvidence {
+      +key
+      +observedValue
+      +unit
+      +comparator
+      +thresholdValue
+      +textValue
+    }
+    class CueDelivery {
+      +deliveredAtElapsedNanos
+      +channel
+      +message
     }
     class CompactRepTrace {
       +traceVersion
@@ -218,13 +237,15 @@ classDiagram
     Rep "0..1" <-- "many" TelemetrySample
     Rep "1" --> "many" RepMetric
     Rep "1" --> "many" FormEvent
+    FormEvent "1" --> "many" FormEvidence
+    FormEvent "1" --> "many" CueDelivery
     Rep "1" --> "0..1" CompactRepTrace
     CompactRepTrace "1" --> "many" TraceChannel
     WorkoutSession "many" --> "0..1" DailyContext
     WorkoutSession "many" --> "0..1" DailyHealthSummary
 ```
 
-`PlannedSet` represents per-set loading/rep/RIR targets. `WorkoutSession` snapshots the plan version used. `CompactRepTrace` is generic through `schemaId + TraceChannel[]`; it is not hard-coded to pressing movements.
+`PlannedSet` can preserve load %, rep and RIR prescriptions without guessing the percentage basis. `FormEvent` means detected issue; `FormEvidence[]` contains structured evidence; `CueDelivery` exists only for feedback actually delivered. `ExerciseSet.telemetryExpiresAt` anchors 7-day short-lived data cleanup.
 
 ## 4. Live Workout Analysis Sequence
 
@@ -256,13 +277,15 @@ sequenceDiagram
         G-->>A: valid MovementFrame
         A->>A: update rep state + metrics
         A->>R: metrics + phase + history
-        R-->>Q: candidate FormEvents
-        Q-->>U: max one prioritized cue
+        R-->>Q: FormEvent + structured FormEvidence
+        R-->>D: persist detected issue + evidence
+        alt cue selected
+          Q-->>U: one prioritized visual / offline-TTS cue
+          Q-->>D: CueDelivery
+        end
         A-->>T: best-effort raw telemetry
-        R-->>D: durable events/evidence
         opt rep completed
-          A-->>D: rep summary + CompactRepTrace
-          A-->>D: final rep metrics
+          A-->>D: rep summary + CompactRepTrace + final metrics
         end
       end
     end
@@ -277,7 +300,7 @@ sequenceDiagram
     end
 ```
 
-The realtime path never waits for Room. Raw telemetry can be shed under pressure; durable rep summaries/metrics/events have reserved priority capacity.
+Detection and delivery are distinct. The realtime path never waits for Room.
 
 ## 5. Health Connect Sequence
 
@@ -300,7 +323,7 @@ sequenceDiagram
     A->>A: discard fine-grained imported records
 ```
 
-Health Connect is optional and never blocks workout monitoring. Upstream apps may have their own cloud behavior outside Gym Buddy's boundary.
+Health Connect is optional and never blocks workout monitoring.
 
 ## 6. Realtime Processing Pipeline
 
@@ -322,12 +345,13 @@ flowchart LR
     A --> D[Durable Event Queue]
     M --> D
     R --> D
+    Q --> D
     D --> W[Async BatchWriter]
     T --> W
     W --> DB[(Room)]
 ```
 
-Backpressure exists independently at camera ingestion and storage. Neither stale frames nor database work may accumulate into coaching latency.
+Backpressure exists independently at camera ingestion and storage. Durable rep/evidence/cue records are prioritized over raw telemetry.
 
 ## 7. Persistence / Data Lifecycle
 
@@ -337,10 +361,11 @@ flowchart TD
     F -->|debug mode only| V[Debug Video]
     F -->|default| D1[Discard immediately]
     P --> T[High-frequency Telemetry]
-    T -->|7 days| DB[(Room / SQLite)]
-    TE[Tracking / Calibration Debug Events] -->|7 days| DB
+    T -->|expires via ExerciseSet.telemetryExpiresAt| DB[(Room / SQLite)]
+    TE[Tracking / Calibration Debug Events] -->|same expiry| DB
     M[Rep Metrics] -->|long-term| DB
-    E[Form Events + Evidence] -->|long-term| DB
+    E[FormEvent + FormEvidence] -->|long-term| DB
+    CD[CueDelivery] -->|long-term| DB
     CT[CompactRepTrace + TraceChannels] -->|long-term| DB
     N[Daily Nutrition Context] -->|long-term| DB
     DH[DailyHealthSummary] -->|long-term| DB
@@ -348,9 +373,9 @@ flowchart TD
     H[Fine-grained Health Connect Records] -->|aggregate in memory| AGG[Health Aggregator]
     AGG --> DH
     AGG --> BC
-    V -->|max 7 days| LF[App-private no-backup storage]
-    RW[Retention Worker] -->|startup + periodic prune| DB
-    RW -->|delete expired debug media| LF
+    V -->|7-day expiry| LF[App-private no-backup storage]
+    RW[Retention Worker] -->|startup + periodic purge| DB
+    RW -->|purge expired debug media| LF
 ```
 
 ### Retention policy
@@ -358,17 +383,17 @@ flowchart TD
 | Data | Retention |
 |---|---|
 | Raw camera frame | discard immediately |
-| High-frequency pose/movement telemetry | 7 days |
-| Tracking/calibration debug events | 7 days |
-| Debug video | OFF by default; max 7 days |
+| High-frequency pose/movement telemetry | expires 7 days after set close |
+| Tracking/calibration debug events | same 7-day set expiry |
+| Debug video | OFF by default; 7-day expiry |
 | CompactRepTrace + TraceChannel[] | long-term |
-| Rep metrics / form events / rule evidence | long-term |
+| Rep metrics / FormEvent / FormEvidence / CueDelivery | long-term |
 | Set/workout summaries | long-term |
 | Daily nutrition / DailyHealthSummary | long-term when present |
 | Weight/body fat | weekly medians + sample counts |
 | Fine-grained Health Connect records | aggregate in memory; not durable |
 
-Full-fidelity re-analysis is available only inside the 7-day telemetry window. Older sessions support compact-trace/metric-level reinterpretation. The retention worker enforces expiration on startup and periodically.
+Expired data is excluded from normal reads once its expiry passes; local startup/periodic cleanup physically purges it.
 
 ## MVP Scope
 
@@ -389,11 +414,9 @@ CameraX
 
 persistence:
 raw telemetry -> TelemetryRingBuffer
-rep summaries / CompactRepTrace / metrics / events -> DurableEventQueue
-both -> asynchronous BatchWriter -> Room
+rep summary / CompactRepTrace / final metrics / FormEvent+FormEvidence / CueDelivery -> DurableEventQueue
+both -> async BatchWriter -> Room
 ```
-
-Initial signals: rep count; exercise-specific phases; ROM; tempo; left/right symmetry; joint/forearm orientation; wrist-path/lateral-drift proxy; tracking confidence; rule evidence.
 
 ## Architectural Invariants
 
@@ -402,12 +425,12 @@ Initial signals: rep count; exercise-specific phases; ROM; tempo; left/right sym
 - No backend, LLM, login, INTERNET permission, cloud path, or personal-data export/share in MVP.
 - Pose model bundled in APK.
 - Android cloud backup disabled.
-- Debug media stays app-private/no-backup and expires within 7 days.
+- Debug media stays app-private/no-backup and expires after 7 days.
 - Offline TTS voice only; visual fallback otherwise.
 - ML is perception only; reasoning is deterministic code.
 - Tracking quality can veto analysis.
 - Exercise analyzers own exercise-specific state machines.
-- Cue arbitration prevents voice spam.
+- Detection, evidence and cue delivery are separately observable.
 - Persistence cannot block realtime coaching.
 - Retention cleanup is explicit and enforced.
 - Raw/high-frequency data has a 7-day window; compact history remains.
