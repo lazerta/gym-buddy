@@ -4,6 +4,8 @@ skinparam shadowing false
 
 rectangle "Camera Frame" as Frame
 rectangle "PoseObservation\nMediaPipe output only; no image bytes" as PoseObs
+rectangle "Telemetry Sampler + Chunker" as TelemetryStage
+rectangle "PoseObservationChunk\nversioned binary payload" as PoseChunk
 rectangle "Tracking / Calibration Debug Events" as Tracking
 rectangle "Rep Metrics" as Metrics
 rectangle "Set-scoped FormEvent + FormEvidence[]\noptional repId" as Events
@@ -26,10 +28,12 @@ rectangle "App-private no-backup storage" as Files
 Frame --> PoseObs : pose inference output
 Frame --> Video : explicit debug mode only
 Frame --> Frame : discard immediately
-PoseObs --> TelemetryQ : short-lived replay/debug input
+PoseObs --> TelemetryStage : candidate observation
+TelemetryStage --> PoseChunk : bounded-rate sample + chunk encode
+PoseChunk --> TelemetryQ : short-lived chunk
 Tracking --> TelemetryQ : short-lived debug events
 Metrics --> PriorityQ : long-term derived metrics
-Events --> PriorityQ : structured detected issues
+Events --> PriorityQ : structured detected issue episodes
 CueDelivery --> PriorityQ : actual feedback record
 CompactTrace --> PriorityQ : long-term generic compact trace
 PriorityQ --> Writer : priority batches
@@ -44,14 +48,20 @@ DailyHealth --> Room : long-term
 Weekly --> Room : long-term
 HealthAgg --> HealthAgg : discard fine-grained inputs
 Video --> Files : <= 7 days
-Retention --> Room : prune expired set-scoped short-lived data
+Retention --> Room : prune expired set-scoped chunks/events
 Retention --> Files : delete expired debug media
-Recovery --> Room : stale ACTIVE -> INTERRUPTED
+Recovery --> Room : stale ACTIVE hierarchy/events -> INTERRUPTED
 
-note right of PoseObs
-Capture immediately after MediaPipe, before normalization/smoothing.
-This permits the best available recent replay of downstream code.
-The buffer is best-effort, so storage pressure may create gaps.
+note right of TelemetryStage
+Realtime inference rate and persisted telemetry rate are independent.
+Chunk multiple timestamped observations into a versioned binary payload.
+Exact sample rate, chunk size and codec belong in SPEC/tests.
+end note
+
+note right of PoseChunk
+Do not store one Room row per analyzed frame.
+Chunks are short-lived, set-scoped and logically expire at
+ExerciseSet.telemetryExpiresAt.
 end note
 
 note right of Tracking
@@ -60,14 +70,8 @@ Tracking/calibration debug events share the set's short-lived expiry.
 end note
 
 note right of Events
-FormEvent belongs to ExerciseSet and optionally references Rep.
-This preserves setup/top-position, partial-attempt, and
-unrecognized-rep issues while keeping evidence structured.
-end note
-
-note right of CueDelivery
-CueDelivery records only feedback actually shown/spoken.
-Suppressed FormEvents have no CueDelivery.
+One continuous detected problem is one FormEvent episode.
+Activation/finalization update the same id; CueDelivery is separate.
 end note
 
 note right of CompactTrace
@@ -79,7 +83,8 @@ end note
 note bottom of PriorityQ
 This queue prioritizes persistence but is not itself durable.
 Durability begins at successful Room commit.
-Normal Stop Set uses a SetCloseBarrier after earlier priority records.
+Normal Stop Set uses a reserved SetCloseBarrier after all earlier
+high-value records and in-memory analyzer/rule finalization.
 end note
 
 note bottom of Retention
@@ -89,9 +94,8 @@ Physical deletion occurs on startup/periodic local cleanup.
 end note
 
 note bottom of Recovery
-If the process dies with ACTIVE workout/execution/set records,
-startup recovery marks them INTERRUPTED instead of treating them
-as an active workout forever.
+If the process dies with ACTIVE workout/execution/set/FormEvent records,
+startup recovery marks them INTERRUPTED instead of leaving open history.
 end note
 
 note bottom of Room
