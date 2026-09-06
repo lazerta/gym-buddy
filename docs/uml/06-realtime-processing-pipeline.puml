@@ -14,39 +14,48 @@ rectangle "Biomechanics Metrics" as Metrics
 rectangle "Deterministic Rules" as Rules
 rectangle "Cue Arbitrator" as Cue
 rectangle "Overlay / TTS" as Output
-queue "Telemetry Ring Buffer\nbounded / best-effort" as TelemetryQ
+queue "Short-lived Telemetry Buffer\nbounded / best-effort" as TelemetryQ
 queue "Priority Persistence Queue\nbounded / reserved capacity" as PriorityQ
 rectangle "Batch Writer" as Writer
 database "Room / SQLite" as Room
 
 Camera --> Scheduler : frame + monotonic timestamp
 Scheduler --> Pose : newest eligible frame only
+Pose --> TelemetryQ : PoseObservation\nno image bytes
 Pose --> Normalize : landmarks + visibility/presence
 Normalize --> Smooth : canonical L/R + coordinate space
 Smooth --> Gate : MovementFrame
 Gate --> Analyzer : valid tracking only
 Gate --> Output : setup/tracking guidance
+Gate --> TelemetryQ : TrackingEvent on state changes
 Analyzer --> Metrics : phase + temporal state
 Metrics --> Rules : metrics + confidence
 Rules --> Cue : set-scoped FormEvent + FormEvidence[]\noptional repId
 Cue --> Output : selected actionable cue
 
-Analyzer --> TelemetryQ : raw telemetry / transient debug data
 Analyzer --> PriorityQ : completed rep summary / CompactRepTrace
 Metrics --> PriorityQ : final rep metrics
 Rules --> PriorityQ : FormEvent + structured evidence
 Cue --> PriorityQ : CueDelivery only when delivered
 PriorityQ --> Writer : persist first
-TelemetryQ --> Writer : best-effort batches
+TelemetryQ --> Writer : best-effort short-lived batches
 Writer --> Room : transactions
 
 note bottom of Scheduler
 Use newest eligible frames; never let a camera backlog grow.
 end note
 
+note bottom of Pose
+PoseObservation is captured before normalization/smoothing so recent
+replay can re-run downstream deterministic stages. It contains only
+pose outputs + frame transform metadata, never camera image bytes.
+end note
+
 note bottom of Gate
 Reject analysis for missing required landmarks, low confidence,
 unsuitable camera view, or temporal discontinuity.
+Emit short-lived TrackingEvent only on meaningful state transitions,
+not every invalid frame.
 end note
 
 note bottom of Cue
@@ -55,10 +64,15 @@ Only actual visual/TTS feedback creates CueDelivery.
 TTS is offline-voice-only.
 end note
 
+note bottom of TelemetryQ
+Best-effort means recent replay may have gaps under storage pressure.
+Dropping short-lived observations is preferable to delaying coaching.
+end note
+
 note bottom of PriorityQ
 PriorityPersistenceQueue is an in-memory scheduling lane.
 It is not durable by itself; Room commit creates durability.
-Keep it bounded with reserved capacity and drain before telemetry.
+SetCloseBarrier is a priority control item used on normal Stop Set.
 end note
 
 @enduml
