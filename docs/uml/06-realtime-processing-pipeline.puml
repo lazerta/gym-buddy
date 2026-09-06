@@ -6,6 +6,7 @@ left to right direction
 rectangle "CameraX" as Camera
 rectangle "Frame Scheduler" as Scheduler
 rectangle "MediaPipe Pose" as Pose
+rectangle "Telemetry Sampler + Chunker" as TelemetryStage
 rectangle "Coordinate Normalizer" as Normalize
 rectangle "Landmark Smoother" as Smooth
 rectangle "Tracking Quality Gate" as Gate
@@ -21,7 +22,8 @@ database "Room / SQLite" as Room
 
 Camera --> Scheduler : frame + monotonic timestamp
 Scheduler --> Pose : newest eligible frame only
-Pose --> TelemetryQ : PoseObservation\nno image bytes
+Pose --> TelemetryStage : PoseObservation\nno image bytes
+TelemetryStage --> TelemetryQ : bounded-rate PoseObservationChunk
 Pose --> Normalize : landmarks + visibility/presence
 Normalize --> Smooth : canonical L/R + coordinate space
 Smooth --> Gate : MovementFrame
@@ -44,6 +46,12 @@ Cue --> Output : selected actionable cue
 
 note bottom of Scheduler
 Use newest eligible frames; never let a camera backlog grow.
+end note
+
+note bottom of TelemetryStage
+Realtime analysis FPS and persisted observation rate are independent.
+Sample by monotonic time and encode multiple observations per versioned chunk.
+Exact sample rate/chunk size/codec are implementation-spec decisions.
 end note
 
 note bottom of Pose
@@ -72,8 +80,9 @@ TTS is offline-voice-only.
 end note
 
 note bottom of TelemetryQ
-Best-effort means recent replay may have gaps under storage pressure.
-Dropping short-lived observations is preferable to delaying coaching.
+Best-effort means recent replay may have sampling gaps or dropped chunks
+under storage pressure. Dropping short-lived observations is preferable
+to delaying coaching.
 end note
 
 note bottom of PriorityQ
