@@ -1,0 +1,42 @@
+@startuml
+!theme plain
+skinparam shadowing false
+skinparam componentStyle rectangle
+
+actor Shawn
+
+rectangle "Gym Buddy\nAndroid App" as App {
+  component "Workout UI" as UI
+  component "Realtime Biomechanics Engine" as Engine
+  component "Local Data Layer" as Local
+}
+
+rectangle "Android Device" {
+  component "CameraX / Camera" as Camera
+  component "Android TextToSpeech" as TTS
+  component "Health Connect" as HC
+}
+
+database "Room / SQLite\nLocal-only" as DB
+rectangle "RENPHO / Health Apps" as Renpho
+
+Shawn --> UI : selects exercise\nstarts/stops set
+Camera --> Engine : video frames
+Engine --> UI : overlay + metrics
+Engine --> TTS : short live cues
+Engine --> Local : telemetry + results
+Local --> DB : persist locally
+HC --> Local : sleep / weight / body fat / HR / steps
+Renpho --> HC : optional upstream sync
+
+note right of App
+  Hard constraints:
+  - Works in airplane mode for workout monitoring
+  - No backend required
+  - No LLM required
+  - No video upload
+  - Single user
+  - Manual exercise selection
+end note
+
+@enduml
