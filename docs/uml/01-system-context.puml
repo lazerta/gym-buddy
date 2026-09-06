@@ -13,7 +13,7 @@ rectangle "Gym Buddy\nAndroid App" as App {
 
 rectangle "Android Device" {
   component "CameraX / Camera" as Camera
-  component "Android TextToSpeech" as TTS
+  component "Android TextToSpeech\nOFFLINE VOICE ONLY" as TTS
   component "Health Connect" as HC
 }
 
@@ -25,7 +25,7 @@ rectangle "Google Drive\nspecs/reports/builds only" as Drive
 Shawn --> UI : selects exercise\nstarts/stops set
 Camera --> Engine : video frames
 Engine --> UI : overlay + metrics
-Engine --> TTS : short live cues
+Engine --> TTS : short live cues\nonly when offline voice available
 Engine --> Local : buffered telemetry + results
 Local --> DB : persist locally
 HC --> Local : optional health context
@@ -43,7 +43,15 @@ note right of App
   - No video upload
   - Single user
   - Manual exercise selection
+  - Pose model bundled with APK; no runtime model download
   - MVP SHALL NOT request android.permission.INTERNET
+  - MVP SHALL NOT implement personal-data export/share
+end note
+
+note bottom of TTS
+  Select only a locally installed voice that does not
+  require a network connection. If unavailable,
+  fall back to visual cues instead of network TTS.
 end note
 
 note bottom of DB
