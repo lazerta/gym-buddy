@@ -11,7 +11,7 @@ rectangle "Landmark Smoother" as Smooth
 rectangle "Tracking Quality Gate" as Gate
 rectangle "Exercise Analyzer" as Analyzer
 rectangle "Biomechanics Metrics" as Metrics
-rectangle "Deterministic Rules" as Rules
+rectangle "Rule Engine + Episode Tracker" as Rules
 rectangle "Cue Arbitrator" as Cue
 rectangle "Overlay / TTS" as Output
 queue "Short-lived Telemetry Buffer\nbounded / best-effort" as TelemetryQ
@@ -29,17 +29,18 @@ Gate --> Analyzer : valid tracking only
 Gate --> Output : setup/tracking guidance
 Gate --> TelemetryQ : TrackingEvent on state changes
 Analyzer --> Metrics : phase + temporal state
-Metrics --> Rules : metrics + confidence
-Rules --> Cue : set-scoped FormEvent + FormEvidence[]\noptional repId
-Cue --> Output : selected actionable cue
+Metrics --> Rules : metrics + phase + confidence
+Rules --> Rules : PENDING / ACTIVE / FINALIZED episodes
+Rules --> Cue : active actionable issue state
 
-Analyzer --> PriorityQ : completed rep summary / CompactRepTrace
+Analyzer --> PriorityQ : completed/partial rep summary / CompactRepTrace
 Metrics --> PriorityQ : final rep metrics
-Rules --> PriorityQ : FormEvent + structured evidence
+Rules --> PriorityQ : FormEvent activation/finalization + evidence upsert
 Cue --> PriorityQ : CueDelivery only when delivered
 PriorityQ --> Writer : persist first
 TelemetryQ --> Writer : best-effort short-lived batches
 Writer --> Room : transactions
+Cue --> Output : selected actionable cue
 
 note bottom of Scheduler
 Use newest eligible frames; never let a camera backlog grow.
@@ -58,6 +59,12 @@ Emit short-lived TrackingEvent only on meaningful state transitions,
 not every invalid frame.
 end note
 
+note bottom of Rules
+A continuous issue is one FormEvent episode, not one event/frame.
+PENDING stays in memory; ACTIVE and FINALIZED states are persisted
+with the same event id.
+end note
+
 note bottom of Cue
 A detected FormEvent may be suppressed from feedback.
 Only actual visual/TTS feedback creates CueDelivery.
@@ -72,7 +79,7 @@ end note
 note bottom of PriorityQ
 PriorityPersistenceQueue is an in-memory scheduling lane.
 It is not durable by itself; Room commit creates durability.
-SetCloseBarrier is a priority control item used on normal Stop Set.
+SetCloseBarrier is a reserved priority control item used on normal Stop Set.
 end note
 
 @enduml
