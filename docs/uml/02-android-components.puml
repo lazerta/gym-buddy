@@ -16,7 +16,7 @@ package "gym-buddy Android App" {
   [Deterministic Rule Engine] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
-  [Telemetry Ring Buffer\nbounded / best-effort] as TelemetryBuffer
+  [Short-lived Telemetry Buffer\nbounded / best-effort] as TelemetryBuffer
   [Priority Persistence Queue\nbounded / reserved capacity] as PriorityQueue
   [Batch Writer\noff realtime path] as BatchWriter
   [Workout Repository] as Repo
@@ -29,23 +29,24 @@ package "gym-buddy Android App" {
 UI --> Camera : start/stop set
 Camera --> Scheduler : frames + timestamps
 Scheduler --> Pose : newest eligible frame
+Pose --> TelemetryBuffer : PoseObservation\n(no image bytes)
 Pose --> Normalize : landmarks + confidence
 Normalize --> Signal : canonical coordinates
 Signal --> Quality : smoothed MovementFrame
 Quality --> Analyzer : valid frames only
 Quality --> Overlay : tracking/calibration guidance
+Quality --> TelemetryBuffer : TrackingEvent on state changes
 Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + recent history
 Rules --> CuePolicy : FormEvent + structured FormEvidence
 CuePolicy --> Overlay : highest-priority actionable cue
 CuePolicy --> [Android TextToSpeech] : offline voice only; otherwise visual fallback
 
-Analyzer --> TelemetryBuffer : raw telemetry / transient tracking data
 Analyzer --> PriorityQueue : completed rep summary + CompactRepTrace
 Metrics --> PriorityQueue : final rep metrics
 Rules --> PriorityQueue : FormEvent + FormEvidence[]
 CuePolicy --> PriorityQueue : CueDelivery when actually delivered
-TelemetryBuffer --> BatchWriter : best-effort batches
+TelemetryBuffer --> BatchWriter : best-effort short-lived batches
 PriorityQueue --> BatchWriter : priority batches first
 BatchWriter --> Repo : persist transaction
 Repo --> Room
@@ -59,24 +60,23 @@ UI --> Repo : history / workout state
 note bottom of Pose
 ML ends here. Everything downstream is deterministic code.
 Pose model is bundled; no runtime network download.
-end note
-
-note bottom of Scheduler
-Do not queue stale camera frames.
-Prefer newest eligible frames so latency stays bounded.
+PoseObservation contains landmarks/confidence/transform metadata only,
+never camera image bytes.
 end note
 
 note bottom of TelemetryBuffer
-Raw/high-frequency data is best-effort.
-Storage pressure must never block coaching.
+Short-lived PoseObservation / TrackingEvent data is best-effort.
+It exists to support recent debugging/replay from perception output.
+Storage pressure may create gaps and must never block coaching.
 end note
 
 note bottom of PriorityQueue
 This is an in-memory PRIORITY queue, not durable storage.
 Durability begins only after Room commit.
 Reserve capacity for rep summaries, compact traces,
-metrics, structured evidence and CueDelivery; drain before telemetry.
-Exact capacity/crash-loss tolerance belongs in the implementation spec.
+metrics, structured evidence, CueDelivery and SetCloseBarrier.
+On normal Stop Set, a SetCloseBarrier is acknowledged only after
+all earlier priority records and the set-close transaction commit.
 end note
 
 note bottom of Retention
