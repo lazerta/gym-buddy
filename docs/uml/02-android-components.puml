@@ -17,6 +17,7 @@ package "gym-buddy Android App" {
   [Deterministic Rule Engine\n+ Episode Tracker] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
+  [Telemetry Sampler + Chunker\nbounded persistence rate] as TelemetryStage
   [Short-lived Telemetry Buffer\nbounded / best-effort] as TelemetryBuffer
   [Priority Persistence Queue\nbounded / reserved capacity] as PriorityQueue
   [Batch Writer\noff realtime path] as BatchWriter
@@ -37,7 +38,8 @@ Session --> Rules : finalize active FormEvent episodes
 Session --> PriorityQueue : SetCloseBarrier after finalization
 Camera --> Scheduler : frames + timestamps
 Scheduler --> Pose : newest eligible frame
-Pose --> TelemetryBuffer : PoseObservation\n(no image bytes)
+Pose --> TelemetryStage : PoseObservation\n(no image bytes)
+TelemetryStage --> TelemetryBuffer : versioned PoseObservationChunk
 Pose --> Normalize : landmarks + confidence
 Normalize --> Signal : canonical coordinates
 Signal --> Quality : smoothed MovementFrame
@@ -71,11 +73,19 @@ UI --> Repo : history / workout state
 note bottom of Pose
 ML ends here. Everything downstream is deterministic code.
 Pose model is bundled; no runtime network download.
-PoseObservation contains landmarks/confidence/transform metadata only,
+PoseObservation contains pose output + frame transform metadata only,
 never camera image bytes.
 end note
 
+note bottom of TelemetryStage
+Realtime analysis FPS and persistence sampling rate are independent.
+Persist only a bounded sample rate and chunk multiple observations
+into versioned binary payloads to avoid one Room row per frame.
+Exact sampling/chunk/codec policy belongs in SPEC/tests.
+end note
+
 note bottom of Session
+At most one ExerciseSet is ACTIVE in the realtime pipeline.
 Stop Set ordering is strict:
 1) stop accepting new camera frames,
 2) await in-flight analysis quiescence,
@@ -92,7 +102,7 @@ the same event id so long-term data does not scale with frame rate.
 end note
 
 note bottom of TelemetryBuffer
-Short-lived PoseObservation / TrackingEvent data is best-effort.
+Short-lived PoseObservationChunk / TrackingEvent data is best-effort.
 Storage pressure may create gaps and must never block coaching.
 end note
 
@@ -104,7 +114,7 @@ end note
 
 note bottom of Recovery
 After process death, stale ACTIVE WorkoutSession /
-ExerciseExecution / ExerciseSet records become INTERRUPTED.
+ExerciseExecution / ExerciseSet / FormEvent records become INTERRUPTED.
 end note
 
 @enduml
