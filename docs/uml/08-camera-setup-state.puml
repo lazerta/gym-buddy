@@ -1,0 +1,62 @@
+@startuml
+!theme plain
+skinparam shadowing false
+
+[*] --> ExerciseSelected
+
+state ExerciseSelected {
+  [*] --> LoadRuntimeConfig
+  LoadRuntimeConfig : load ExerciseDefinition
+  LoadRuntimeConfig : load optional CalibrationProfile
+}
+
+ExerciseSelected --> SetupChecking : open camera / pose available
+SetupChecking --> SetupGuidance : required landmarks missing\nwrong orientation/view\nconfidence unstable
+SetupGuidance --> SetupChecking : user repositions phone/body
+SetupChecking --> Ready : setup valid for stability window
+
+Ready --> ActiveSet : user taps Start Set
+ActiveSet --> TrackingDegraded : quality gate invalid beyond debounce
+TrackingDegraded --> ActiveSet : quality valid for recovery window
+TrackingDegraded --> RepositionRequired : invalid persists
+RepositionRequired --> ActiveSet : setup recovers and stabilizes
+
+ActiveSet --> Finalizing : user taps Stop Set
+TrackingDegraded --> Finalizing : user taps Stop Set
+RepositionRequired --> Finalizing : user taps Stop Set
+Finalizing --> Ready : analyzer/rules finalized\nSetCloseBarrier committed
+
+ExerciseSelected --> [*] : leave workout
+Ready --> [*] : leave workout
+
+note right of SetupChecking
+This is camera/setup calibration, not a claim of exact
+anthropometric limb-length measurement from one phone camera.
+Height may be user-provided for normalized context, but the app
+must not invent exact limb lengths in centimeters.
+end note
+
+note right of Ready
+Start Set is enabled only after a stable valid setup window.
+Exact stability duration and confidence thresholds belong in SPEC/tests.
+end note
+
+note right of TrackingDegraded
+Do not advance rep state, evaluate biomechanics form rules,
+or deliver form cues while tracking quality is invalid.
+Camera/setup guidance may still be shown.
+Short-lived TrackingEvent records meaningful state transitions.
+end note
+
+note right of RepositionRequired
+A prolonged invalid state should prefer clear reposition guidance
+over repeated form coaching. Recovery is automatic once the setup
+is valid again for the configured recovery window.
+end note
+
+note right of Finalizing
+Stop Set first quiesces in-flight analysis, then finalizes partial
+rep/rule state, then commits the reserved SetCloseBarrier.
+end note
+
+@enduml
