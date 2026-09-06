@@ -4,82 +4,79 @@ Architecture source of truth for the private-use, local-first Android biomechani
 
 ## Version
 
-**v0.6 — final architecture review candidate**
+**v0.7 — final architecture review candidate**
 
 ## Diagrams
 
-1. `01-system-context.puml` — local-only boundary, bundled pose model, offline TTS and no-export policy.
-2. `02-android-components.puml` — realtime components, priority persistence lanes, health aggregation and retention enforcement.
-3. `03-domain-model.puml` — plan/set targets, multi-exercise workouts, structured rule evidence, delivered cues and generic compact traces.
-4. `04-live-analysis-sequence.puml` — frame-to-cue flow with separate detection/delivery and async persistence.
+1. `01-system-context.puml` — local-only boundary, bundled pose model, offline TTS, no network permission/export.
+2. `02-android-components.puml` — realtime components, best-effort telemetry lane, priority persistence lane, health aggregation, retention.
+3. `03-domain-model.puml` — versioned plan/set targets, multi-exercise workouts, set-scoped form events, structured evidence, generic compact traces.
+4. `04-live-analysis-sequence.puml` — realtime flow, detection-vs-delivery, async priority persistence, crash-safe set expiry.
 5. `05-health-connect-sequence.puml` — optional Health Connect ingestion and compact aggregation.
-6. `06-realtime-processing-pipeline.puml` — independent camera/storage backpressure and durable feedback observability.
-7. `07-persistence-data-lifecycle.puml` — 7-day expiry semantics, local cleanup, compact history and no-export policy.
+6. `06-realtime-processing-pipeline.puml` — independent camera/storage backpressure and priority persistence.
+7. `07-persistence-data-lifecycle.puml` — 7-day expiry semantics, local purge, long-term compact history.
 
 ## Architectural invariants
 
 - Android only, single user.
-- Workout monitoring works fully in airplane mode.
+- Workout monitoring works in airplane mode.
 - MVP SHALL NOT request `android.permission.INTERNET`.
 - MediaPipe pose model is bundled with the APK; no runtime model download.
-- No backend, LLM, account/login system, Gym Buddy cloud path, or personal-data export/share feature exists in MVP.
-- TTS uses only an installed voice that does not require a network connection; otherwise feedback remains visual-only.
-- ML is perception only. Deterministic code owns movement interpretation and coaching decisions.
-- Health Connect is optional context and never part of the realtime camera critical path.
+- No backend, LLM, account/login, Gym Buddy cloud path, or personal-data export/share in MVP.
+- TTS uses only an installed voice that does not require network; otherwise visual-only feedback.
+- ML is perception only; deterministic code owns movement interpretation and coaching.
+- Health Connect is optional context and never in the realtime camera critical path.
 - Exercise selection is explicit.
-- Coordinate normalization happens before exercise-specific reasoning.
-- Camera ingestion uses latest-frame/backpressure semantics; stale frames do not accumulate.
-- Tracking/calibration quality can veto analysis and coaching.
-- Rule detection and cue delivery are separate facts.
-- Cue arbitration prevents feedback spam; `CueDelivery` exists only when feedback is actually shown/spoken.
-- Persistence is outside the realtime coaching path.
-- Short-lived telemetry uses a bounded best-effort ring buffer.
-- Durable rep summaries, compact traces, final metrics, structured `FormEvidence`, `FormEvent`s and `CueDelivery` records use a separate priority queue.
-- Android backup/cloud backup of Gym Buddy personal data is disabled.
-- Debug media stays in app-private/no-backup storage.
-- Retention cleanup runs on startup and periodically without network access.
+- Coordinate normalization precedes exercise-specific reasoning.
+- Camera ingestion is latest-frame/bounded; stale frames never accumulate.
+- Tracking/calibration quality can veto biomechanics analysis and coaching.
+- Detection (`FormEvent` + `FormEvidence`) and delivery (`CueDelivery`) are separate facts.
+- Persistence never blocks realtime coaching.
+- Raw telemetry uses a bounded best-effort `TelemetryRingBuffer`.
+- Higher-value records use a bounded `PriorityPersistenceQueue` with reserved capacity and drain before raw telemetry.
+- `PriorityPersistenceQueue` is not durable storage; durability begins only after Room commit.
+- Android cloud backup of Gym Buddy personal data is disabled.
+- Debug media is app-private/no-backup and expires after 7 days.
+- Retention cleanup runs locally on startup and periodically.
 
 ## Domain invariants
 
-- `TrainingPlan -> TrainingDay -> PlannedExercise -> PlannedSet`; exercises reference reusable `ExerciseDefinition`s.
-- `PlannedSet` supports per-set load %, rep range and RIR range. `loadPercentBasis` records what the percentage means when known; it remains null when the source plan does not define the denominator.
-- Plan definitions are versioned. `UserProfile` points to the active plan; `WorkoutSession` snapshots the plan id/version used that day.
-- `WorkoutSession` may contain many `ExerciseExecution`s.
-- Exercise-specific provenance belongs to `ExerciseExecution`.
+- `TrainingPlan -> TrainingDay -> PlannedExercise -> PlannedSet`; planned exercises reference reusable `ExerciseDefinition`s.
+- `PlannedSet` supports per-set load %, rep range and RIR range. `loadPercentBasis` is recorded only when the source defines it; otherwise it remains null rather than guessed.
+- Plan definitions are versioned. `UserProfile` points to the active plan; `WorkoutSession` snapshots the plan/version used that day.
+- `WorkoutSession` represents one gym visit and may contain many `ExerciseExecution`s.
+- Exercise-specific analyzer/metric/calibration versions belong to `ExerciseExecution`.
 - `ExerciseExecution.plannedExerciseId` and `ExerciseSet.plannedSetId` are optional for ad-hoc work.
-- `ExerciseSet` stores wall-clock start/end and `telemetryExpiresAt`; short-lived children use that expiry anchor.
-- Realtime duration timestamps use monotonic elapsed-time values, not wall clock.
-- `TelemetrySample` belongs to `ExerciseSet` and may optionally reference a `Rep`.
-- `FormEvent` records a persisted detected issue; `FormEvidence[]` stores structured observed/threshold facts.
-- `CueDelivery` records only feedback actually delivered to the user. Suppressed issues have no delivery record.
+- `ExerciseSet.telemetryExpiresAt` is non-null from creation: initialize to `startedAt + 7 days`; on normal close update to `endedAt + 7 days`.
+- Realtime duration/event timestamps use monotonic elapsed-time values, while wall-clock `Instant`s are used for history and retention.
+- `TelemetrySample` belongs to `ExerciseSet` and may optionally reference `Rep`.
+- `FormEvent` belongs to `ExerciseSet` and may optionally reference `Rep`, so issues can exist during setup/top position, partial attempts, or unrecognized reps.
+- `FormEvidence[]` stores structured observed/threshold facts; `CueDelivery` records only feedback actually delivered.
 - `CompactRepTrace` is generic: `schemaId + TraceChannel[]` on a small normalized time axis.
-- Full-fidelity re-analysis is available only inside the 7-day telemetry window; older sessions support compact-trace/metric-level reinterpretation.
-- Fine-grained Health Connect records are in-memory aggregation inputs, not permanent Gym Buddy data.
-- `DailyHealthSummary` stores compact daily health context when available.
-- `WeeklyBodyComposition` stores weekly median weight/body-fat plus sample counts.
-- Missing health data never blocks workout monitoring.
+- Full-fidelity re-analysis exists only during the 7-day telemetry window; older sessions support compact-trace/metric-level reinterpretation.
+- Fine-grained Health Connect data is processed in memory and not retained long-term.
+- `DailyHealthSummary` is compact daily health context; `WeeklyBodyComposition` stores weekly median weight/body-fat plus sample counts.
+- Missing health data never blocks training.
 
 ## Data retention policy
 
 - Raw camera frames: discard immediately.
-- High-frequency pose/movement telemetry: expires at **7 days**.
-- Tracking/calibration debug events: expires at **7 days**.
-- Debug video: OFF by default; expires at **7 days** in app-private/no-backup storage.
-- Expired data is excluded from normal reads; startup/periodic local cleanup physically purges it.
-- `CompactRepTrace`, rep metrics, form events/evidence, delivered cues, set/workout summaries: long-term.
+- High-frequency pose/movement telemetry: expires no later than the set's 7-day `telemetryExpiresAt`.
+- Tracking/calibration debug events: same set-scoped expiry.
+- Debug video: OFF by default; 7-day expiry in app-private/no-backup storage.
+- Expired short-lived data is excluded from normal reads immediately; startup/periodic cleanup physically purges it.
+- `CompactRepTrace`, rep metrics, form events/evidence, cue deliveries, set/workout summaries: long-term.
 - Daily nutrition context and `DailyHealthSummary`: long-term when present.
-- Weight/body-fat: one `WeeklyBodyComposition` per week, preferably medians plus sample counts.
-- Fine-grained Health Connect history: aggregate in memory; do not persist long-term.
+- Weight/body-fat: one `WeeklyBodyComposition` per week, preferably medians + sample counts.
+- Fine-grained Health Connect records: aggregate in memory; never durable Gym Buddy history.
 
 ## Privacy / repository boundary
 
 Real personal data belongs **only on the Android device**.
 
 - GitHub: source code, architecture, tests, synthetic/anonymized fixtures only.
-- Google Drive: specs, architecture, reports without personal telemetry, and build artifacts only.
-- Android device: workout/health summaries, short-lived telemetry, metrics, form evidence/events, delivered cues, calibration, compact traces and optional debug media.
-
-Do **not** commit or upload real health data, telemetry exports, workout recordings, sleep/weight history, nutrition logs, or debug video to GitHub or Google Drive.
+- Google Drive: specs, architecture, non-personal reports, build artifacts only.
+- Android device: workout/health summaries, short-lived telemetry, metrics, form evidence/events, delivered cues, calibration, compact traces, optional debug media.
 
 ## MVP implementation target
 
@@ -94,14 +91,14 @@ CameraX
 -> tracking quality gate
 -> InclineDumbbellPressAnalyzer
 -> biomechanics metrics
--> deterministic form rules
+-> deterministic rules
 -> cue arbitration
 -> overlay / offline-only TTS
 
 persistence:
 raw telemetry -> TelemetryRingBuffer
-rep summary / CompactRepTrace / final metrics / FormEvent+FormEvidence / CueDelivery -> DurableEventQueue
+rep summaries / CompactRepTrace / final metrics / FormEvent+FormEvidence / CueDelivery -> PriorityPersistenceQueue
 both -> async BatchWriter -> Room
 ```
 
-Health Connect integration comes after the realtime camera path is proven and must not block it.
+Exact queue capacities, cleanup cadence, Health Connect aggregation windows, exercise-specific compact trace channels, rule thresholds and cue cooldowns belong to the SPEC/test layer, not UML.
