@@ -15,7 +15,7 @@ participant "InclineDbPressAnalyzer" as Analyzer
 participant "BiomechanicsMetrics" as Metrics
 participant "RuleEngine" as Rules
 participant "CueArbitrator" as Cue
-queue "TelemetryRingBuffer" as TelemetryQ
+queue "ShortLivedTelemetryBuffer" as TelemetryQ
 queue "PriorityPersistenceQueue" as PriorityQ
 participant "BatchWriter" as Writer
 participant "WorkoutRepository" as Repo
@@ -23,18 +23,20 @@ database "Room / SQLite" as DB
 
 Shawn -> UI : select Incline Dumbbell Press
 Shawn -> UI : Start Set
-UI -> Repo : create ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days
+UI -> Repo : create ACTIVE ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days
 Repo -> DB : persist set state
 UI -> Camera : start stream
 
 loop each camera frame
   Camera -> Scheduler : frame + monotonic timestamp
   Scheduler -> Pose : newest eligible frame
-  Pose --> Normalize : landmarks + confidence
+  Pose -> TelemetryQ : best-effort PoseObservation\nlandmarks + transform metadata only
+  Pose --> Normalize : same pose output
   Normalize --> Signal : canonical coordinates
   Signal --> Gate : MovementFrame
   alt tracking invalid
     Gate --> UI : setup / visibility guidance
+    Gate -> TelemetryQ : TrackingEvent on state change
   else valid
     Gate --> Analyzer : valid frame
     Analyzer -> Analyzer : update rep state
@@ -53,7 +55,6 @@ loop each camera frame
       Cue --> Cue : no delivery record
     end
 
-    Analyzer -> TelemetryQ : raw telemetry
     alt rep completed
       Analyzer --> UI : increment rep count
       Analyzer -> PriorityQ : rep summary + CompactRepTrace
@@ -67,20 +68,38 @@ loop async priority persistence
   Writer -> Repo : persist
   Repo -> DB : transaction
 end
-loop async telemetry persistence
-  TelemetryQ -> Writer : next telemetry batch
-  Writer -> Repo : persist short-lived telemetry
+loop async short-lived telemetry persistence
+  TelemetryQ -> Writer : next best-effort batch
+  Writer -> Repo : persist PoseObservation / TrackingEvent
   Repo -> DB : transaction
 end
 
 Shawn -> UI : Stop Set
 UI -> Camera : stop stream
-UI -> PriorityQ : finalize set summary\nendedAt + telemetryExpiresAt = endedAt + 7 days
+UI -> PriorityQ : enqueue SetCloseBarrier\nendedAt + status=COMPLETED\ntelemetryExpiresAt = endedAt + 7 days
+PriorityQ -> Writer : drain earlier priority records, then barrier
+Writer -> Repo : commit pending priority data + close set
+Repo -> DB : durable transaction(s)
+Writer --> UI : SetCloseBarrier committed
+UI --> Shawn : set saved / closed
+
+note over Pose,TelemetryQ
+Recent replay starts from perception output before normalization/smoothing.
+No camera image bytes are stored. PoseObservation is best-effort,
+so storage pressure may create gaps; do not promise perfect replay.
+end note
 
 note over TelemetryQ,PriorityQ
 Storage is outside the coaching critical path.
-PriorityPersistenceQueue is in-memory priority scheduling,
-not durable storage; records become durable after Room commit.
+Short-lived telemetry may be dropped under pressure.
+PriorityPersistenceQueue is in-memory scheduling, not durable storage;
+records become durable after Room commit.
+end note
+
+note over Writer,UI
+Normal Stop Set has an explicit durability barrier for higher-value data.
+A process crash may still lose uncommitted current data; on next startup,
+stale ACTIVE workout/execution/set records are recovered as INTERRUPTED.
 end note
 
 note over Rules,Cue
