@@ -14,7 +14,7 @@ package "gym-buddy Android App" {
   [Tracking Quality Gate] as Quality
   [Exercise Analyzer\nIncline DB Press first] as Analyzer
   [Biomechanics Metrics] as Metrics
-  [Deterministic Rule Engine] as Rules
+  [Deterministic Rule Engine\n+ Episode Tracker] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
   [Short-lived Telemetry Buffer\nbounded / best-effort] as TelemetryBuffer
@@ -32,7 +32,9 @@ UI --> Session : start/stop set
 Session --> Repo : create/close workout hierarchy
 Session --> Camera : start / stop accepting frames
 Session --> Scheduler : await analysis quiescence on Stop Set
-Session --> PriorityQueue : SetCloseBarrier after pipeline idle
+Session --> Analyzer : finalize partial/in-progress rep state
+Session --> Rules : finalize active FormEvent episodes
+Session --> PriorityQueue : SetCloseBarrier after finalization
 Camera --> Scheduler : frames + timestamps
 Scheduler --> Pose : newest eligible frame
 Pose --> TelemetryBuffer : PoseObservation\n(no image bytes)
@@ -44,17 +46,17 @@ Quality --> Overlay : tracking/calibration guidance
 Quality --> TelemetryBuffer : TrackingEvent on state changes
 Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + recent history
-Rules --> CuePolicy : FormEvent + structured FormEvidence
+Rules --> CuePolicy : active actionable issue state
 CuePolicy --> Overlay : highest-priority actionable cue
 CuePolicy --> [Android TextToSpeech] : offline voice only; otherwise visual fallback
 
-Analyzer --> PriorityQueue : completed rep summary + CompactRepTrace
+Analyzer --> PriorityQueue : completed/partial rep summary + CompactRepTrace
 Metrics --> PriorityQueue : final rep metrics
-Rules --> PriorityQueue : FormEvent + FormEvidence[]
+Rules --> PriorityQueue : FormEvent activation/finalization + FormEvidence[]
 CuePolicy --> PriorityQueue : CueDelivery when actually delivered
 TelemetryBuffer --> BatchWriter : best-effort short-lived batches
 PriorityQueue --> BatchWriter : priority batches first / SetCloseBarrier
-BatchWriter --> Repo : persist transaction
+BatchWriter --> Repo : persist / upsert transaction
 Repo --> Room
 BatchWriter --> Session : SetCloseBarrier commit ack
 Session --> UI : set saved only after ack
@@ -77,14 +79,20 @@ note bottom of Session
 Stop Set ordering is strict:
 1) stop accepting new camera frames,
 2) await in-flight analysis quiescence,
-3) enqueue SetCloseBarrier,
-4) show saved/closed only after Room commit ack.
+3) finalize analyzer/rule in-memory state,
+4) enqueue SetCloseBarrier,
+5) show saved/closed only after Room commit ack.
 Raw short-lived telemetry need not block this barrier.
+end note
+
+note bottom of Rules
+One continuous form problem is one stateful FormEvent episode.
+PENDING stays in memory; ACTIVE/FINALIZED state is persisted using
+the same event id so long-term data does not scale with frame rate.
 end note
 
 note bottom of TelemetryBuffer
 Short-lived PoseObservation / TrackingEvent data is best-effort.
-It exists to support recent debugging/replay from perception output.
 Storage pressure may create gaps and must never block coaching.
 end note
 
