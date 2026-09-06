@@ -6,47 +6,60 @@ rectangle "Camera Frame" as Frame
 rectangle "Pose / Movement Telemetry" as Telemetry
 rectangle "Rep Metrics" as Metrics
 rectangle "Form Events + Rule Evidence" as Events
-rectangle "Tracking Events" as Tracking
-rectangle "Health Context Cache" as Health
+rectangle "Tracking / Calibration Debug Events" as Tracking
+rectangle "Daily Sleep / Nutrition Summary" as Daily
+rectangle "Weekly Body Composition\n(weight + body fat)" as Weekly
+rectangle "Health Connect Fine-grained Records" as Health
 rectangle "Debug Video\n(opt-in only)" as Video
 rectangle "Room / SQLite" as Room
-rectangle "Local File Storage" as Files
+rectangle "App-private no-backup storage" as Files
 
 Frame --> Telemetry : infer pose
 Frame --> Video : only in explicit debug mode
-Frame --> Frame : discard after processing
-Telemetry --> Room : short/medium retention
+Frame --> Frame : discard immediately after processing
+Telemetry --> Room : retain 7 days
+Tracking --> Room : retain 7 days
 Metrics --> Room : long-term
 Events --> Room : long-term
-Tracking --> Room : long-term / bounded
-Health --> Room : normalized local cache
-Video --> Files : explicit opt-in
+Daily --> Room : long-term compact summary
+Weekly --> Room : long-term weekly snapshot
+Health --> Room : temporary / normalized cache only
+Video --> Files : retain <= 7 days
 
 note right of Telemetry
-Telemetry retention must be bounded.
-Prefer configurable downsampling / compaction
-instead of unlimited per-frame growth.
+High-frequency raw movement telemetry is a short-term
+debug/re-analysis window only.
+Delete after 7 days.
+Keep compact/downsampled rep traces only if useful long-term.
+end note
+
+note right of Weekly
+One snapshot per week.
+Prefer median of valid measurements from that week.
+Do not permanently copy every weight/body-fat reading.
 end note
 
 note right of Metrics
-Keep durable derived metrics because they are tiny
+Keep durable derived metrics because they are small
 and useful for longitudinal trend analysis.
 end note
 
 note right of Events
 Persist rule id/version and exact evidence
-so decisions remain explainable and replayable.
+so decisions remain explainable.
 end note
 
 note right of Video
-Never save by default.
-Never upload automatically.
-Use only when debugging a detector/rule failure.
+OFF by default.
+App-private/no-backup storage only.
+Delete after at most 7 days.
+Manual export is the only allowed path out of the app sandbox.
 end note
 
 note bottom of Room
-Personal data stays on-device.
-Exports/backups, if ever added, must be explicit user actions.
+Real personal data stays on-device only.
+Android cloud backup must be disabled.
+No automatic export/sync path to GitHub or Google Drive.
 end note
 
 @enduml
