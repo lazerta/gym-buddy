@@ -19,24 +19,36 @@ rectangle "Android Device" {
 
 database "Room / SQLite\nLocal-only" as DB
 rectangle "RENPHO / Health Apps" as Renpho
+rectangle "GitHub\ncode/docs/synthetic only" as GitHub
+rectangle "Google Drive\nspecs/reports/builds only" as Drive
 
 Shawn --> UI : selects exercise\nstarts/stops set
 Camera --> Engine : video frames
 Engine --> UI : overlay + metrics
 Engine --> TTS : short live cues
-Engine --> Local : telemetry + results
+Engine --> Local : buffered telemetry + results
 Local --> DB : persist locally
-HC --> Local : sleep / weight / body fat / HR / steps
+HC --> Local : optional health context
 Renpho --> HC : optional upstream sync
+
+App ..x GitHub : no personal-data path
+App ..x Drive : no personal-data path
 
 note right of App
   Hard constraints:
   - Works in airplane mode for workout monitoring
   - No backend required
   - No LLM required
+  - No account/login system
   - No video upload
   - Single user
   - Manual exercise selection
+  - MVP SHALL NOT request android.permission.INTERNET
+end note
+
+note bottom of DB
+  Real Gym Buddy personal data stays on-device.
+  Android cloud backup is disabled.
 end note
 
 @enduml
