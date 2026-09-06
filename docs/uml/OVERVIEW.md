@@ -1,6 +1,6 @@
-# Gym Buddy UML Overview v0.4
+# Gym Buddy UML Overview v0.5
 
-Post-review architecture candidate for a single-user, local-first Android biomechanics coach.
+Final review candidate for a single-user, local-first Android biomechanics coach.
 
 ## 1. System Context
 
@@ -9,7 +9,7 @@ flowchart LR
     U[Shawn\nSingle User] --> A[Gym Buddy Android App]
     C[CameraX] --> A
     H[Health Connect] --> A
-    A --> T[Android TTS / Overlay]
+    A --> T[Android TTS\nOffline voice only]
     A --> D[(Room / SQLite)]
 
     subgraph OnDevice[On-device personal-data boundary]
@@ -18,11 +18,11 @@ flowchart LR
       D
     end
 
-    N[No backend\nNo LLM\nNo login\nNo Gym Buddy cloud data path\nNo INTERNET permission in MVP\nAirplane-mode workout monitoring] -. constraints .-> A
+    N[No backend\nNo LLM\nNo login\nNo INTERNET permission\nBundled pose model\nNo personal-data export/share\nAirplane-mode workout monitoring] -. constraints .-> A
     A -. no personal-data path .-x G[GitHub / Google Drive]
 ```
 
-Real Gym Buddy personal data stays on the Android device. GitHub contains code/tests/synthetic fixtures; Google Drive contains specs/reports/builds without real telemetry or health records.
+Real Gym Buddy personal data stays on the Android device. TTS uses only a locally installed non-network voice; otherwise cues are visual-only.
 
 ## 2. Android Component Architecture
 
@@ -30,7 +30,7 @@ Real Gym Buddy personal data stays on the Android device. GitHub contains code/t
 flowchart LR
     UI[Compose UI] --> CAM[CameraX]
     CAM --> FS[Latest-frame Scheduler]
-    FS --> POSE[MediaPipe Pose]
+    FS --> POSE[Bundled MediaPipe Pose]
     POSE --> NORM[Coordinate Normalizer]
     NORM --> SIG[Landmark Smoother / Motion Features]
     SIG --> QG[Tracking Quality Gate]
@@ -40,20 +40,24 @@ flowchart LR
     MET --> RULES[Deterministic Rule Engine]
     RULES --> CUE[Cue Policy + Arbitrator]
     CUE --> UI
-    CUE --> TTS[Android TTS]
+    CUE --> TTS[Offline-only Android TTS]
 
-    ANA --> BUF[Bounded TelemetryBuffer]
-    MET --> BUF
-    RULES --> BUF
-    BUF --> BW[Async BatchWriter]
+    ANA --> TQ[Telemetry Ring Buffer\nBest-effort]
+    ANA --> DQ[Durable Event Queue\nPriority]
+    MET --> DQ
+    RULES --> DQ
+    DQ --> BW[Async BatchWriter]
+    TQ --> BW
     BW --> REPO[Workout Repository]
     REPO --> DB[(Room)]
 
     HC[Health Connect Adapter] --> HA[Health Aggregator]
     HA --> REPO
+    RW[Retention Worker] --> REPO
+    RW --> FILES[App-private no-backup files]
 ```
 
-**Key rules:** ML stops at pose perception. Stale camera frames are dropped instead of queued. Invalid tracking/calibration blocks biomechanics analysis and coaching cues. Storage is off the realtime critical path. If persistence falls behind, drop raw telemetry before delaying coaching or losing durable rep/event summaries.
+**Key rules:** stale camera frames are dropped; invalid tracking blocks analysis; storage is off the realtime path; durable summaries/events have a dedicated priority lane; retention cleanup runs at startup and periodically.
 
 ## 3. Domain / Data Model
 
@@ -62,42 +66,44 @@ classDiagram
     class UserProfile {
       +heightCm
       +preferredUnits
+      +activeTrainingPlanId
+      +activeTrainingPlanVersion
     }
-
     class TrainingPlan {
       +id
       +name
       +version
     }
-
     class TrainingDay {
       +dayOfWeek
       +displayName
       +order
     }
-
     class PlannedExercise {
       +exerciseId
       +order
-      +targetSets
-      +repRangeMin
-      +repRangeMax
+      +notes
     }
-
+    class PlannedSet {
+      +setNumber
+      +targetLoadPct
+      +repsMin
+      +repsMax
+      +rirMin
+      +rirMax
+    }
     class ExerciseDefinition {
       +id
       +displayName
       +analyzerType
       +defaultCameraView
     }
-
     class CalibrationProfile {
       +exerciseId
       +version
       +cameraView
       +createdAt
     }
-
     class DailyContext {
       +date
       +caloriesKcal
@@ -108,7 +114,6 @@ classDiagram
       +waterMl
       +sodiumMg
     }
-
     class DailyHealthSummary {
       +date
       +sleepMinutes
@@ -118,7 +123,6 @@ classDiagram
       +activeCaloriesKcal
       +sourceSummary
     }
-
     class WeeklyBodyComposition {
       +weekStart
       +medianWeightKg
@@ -127,53 +131,46 @@ classDiagram
       +bodyFatSampleCount
       +sourceSummary
     }
-
     class WorkoutSession {
-      +id
       +startedAt
       +endedAt
+      +trainingPlanId
+      +trainingPlanVersion
       +appBuild
       +poseModelVersion
     }
-
     class ExerciseExecution {
-      +id
       +exerciseId
+      +plannedExerciseId
       +order
       +analyzerVersion
       +metricVersion
       +calibrationVersion
     }
-
     class ExerciseSet {
-      +id
+      +plannedSetId
       +setNumber
-      +load
+      +loadKg
       +targetReps
     }
-
     class Rep {
-      +id
       +repNumber
-      +startedAtMs
-      +endedAtMs
+      +startedAtElapsedNanos
+      +endedAtElapsedNanos
       +completionState
     }
-
     class TelemetrySample {
-      +timestampMs
+      +elapsedRealtimeNanos
       +repId nullable
       +phase nullable
       +landmarks
       +trackingConfidence
     }
-
     class TrackingEvent {
-      +timestampMs
+      +elapsedRealtimeNanos
       +type
       +severity
     }
-
     class RepMetric {
       +metricType
       +value
@@ -181,7 +178,6 @@ classDiagram
       +confidence
       +metricVersion
     }
-
     class FormEvent {
       +ruleId
       +ruleVersion
@@ -190,18 +186,23 @@ classDiagram
       +evidenceJson
       +cue
     }
-
     class CompactRepTrace {
       +traceVersion
+      +schemaId
       +pointCount
       +normalizedTime
-      +elbowAngles
-      +wristPaths
+    }
+    class TraceChannel {
+      +name
+      +unit
+      +side
+      +values
     }
 
-    UserProfile "1" --> "1" TrainingPlan
+    UserProfile "1" --> "many" TrainingPlan
     TrainingPlan "1" --> "many" TrainingDay
     TrainingDay "1" --> "many" PlannedExercise
+    PlannedExercise "1" --> "many" PlannedSet
     PlannedExercise "many" --> "1" ExerciseDefinition
     UserProfile "1" --> "many" CalibrationProfile
     UserProfile "1" --> "many" DailyContext
@@ -218,11 +219,12 @@ classDiagram
     Rep "1" --> "many" RepMetric
     Rep "1" --> "many" FormEvent
     Rep "1" --> "0..1" CompactRepTrace
+    CompactRepTrace "1" --> "many" TraceChannel
     WorkoutSession "many" --> "0..1" DailyContext
     WorkoutSession "many" --> "0..1" DailyHealthSummary
 ```
 
-A workout may contain many exercises. Exercise-specific analyzer/calibration versions belong to `ExerciseExecution`. Full telemetry is short-lived; `CompactRepTrace` is the small long-term movement artifact.
+`PlannedSet` represents per-set loading/rep/RIR targets. `WorkoutSession` snapshots the plan version used. `CompactRepTrace` is generic through `schemaId + TraceChannel[]`; it is not hard-coded to pressing movements.
 
 ## 4. Live Workout Analysis Sequence
 
@@ -237,7 +239,8 @@ sequenceDiagram
     participant A as Exercise Analyzer
     participant R as Rules
     participant Q as Cue Arbitrator
-    participant B as TelemetryBuffer
+    participant T as Telemetry Queue
+    participant D as Durable Queue
     participant W as BatchWriter
     participant DB as Room
 
@@ -247,26 +250,34 @@ sequenceDiagram
       F->>P: newest eligible frame
       P-->>N: landmarks + confidence
       N-->>G: canonical MovementFrame
-      alt tracking/calibration invalid
+      alt tracking invalid
         G-->>U: setup / visibility guidance
       else valid
         G-->>A: valid MovementFrame
-        A->>A: update exercise-specific rep state + metrics
-        A->>R: metrics + phase + recent history
+        A->>A: update rep state + metrics
+        A->>R: metrics + phase + history
         R-->>Q: candidate FormEvents
-        Q-->>U: max one prioritized overlay/TTS cue
-        A-->>B: offer telemetry / rep transitions / metrics
-        R-->>B: offer evidence / FormEvents
+        Q-->>U: max one prioritized cue
+        A-->>T: best-effort raw telemetry
+        R-->>D: durable events/evidence
+        opt rep completed
+          A-->>D: rep summary + CompactRepTrace
+          A-->>D: final rep metrics
+        end
       end
     end
 
-    loop asynchronous persistence
-      B->>W: drain bounded batch
+    loop async durable persistence
+      D->>W: durable batch first
+      W->>DB: transaction
+    end
+    loop async telemetry persistence
+      T->>W: telemetry batch
       W->>DB: transaction
     end
 ```
 
-Persistence never blocks coaching. The buffer is bounded; under pressure, raw telemetry is dropped before durable summaries/events.
+The realtime path never waits for Room. Raw telemetry can be shed under pressure; durable rep summaries/metrics/events have reserved priority capacity.
 
 ## 5. Health Connect Sequence
 
@@ -283,38 +294,40 @@ sequenceDiagram
     HC-->>G: sleep / weight / body fat / resting HR / steps / active calories
     G->>G: normalize + deduplicate in memory
     G->>A: normalized records
-    A->>A: create DailyHealthSummary
-    A->>A: weekly median weight/body-fat + sample counts
+    A->>A: build DailyHealthSummary
+    A->>A: weekly medians + sample counts
     A->>DB: persist compact summaries only
     A->>A: discard fine-grained imported records
-
-    Note over G,DB: Health Connect is optional and never in the realtime camera critical path.
 ```
+
+Health Connect is optional and never blocks workout monitoring. Upstream apps may have their own cloud behavior outside Gym Buddy's boundary.
 
 ## 6. Realtime Processing Pipeline
 
 ```mermaid
 flowchart LR
     C[CameraX] --> F[Latest-frame Scheduler]
-    F --> P[MediaPipe Pose]
+    F --> P[Bundled MediaPipe Pose]
     P --> N[Coordinate Normalizer]
     N --> S[Landmark Smoother]
     S --> G{Tracking Quality Gate}
-    G -- Invalid --> X[No biomechanics analysis\nShow setup/tracking guidance]
+    G -- Invalid --> X[Setup/tracking guidance only]
     G -- Valid --> A[Exercise-specific Analyzer]
     A --> M[Biomechanics Metrics]
     M --> R[Deterministic Rules]
     R --> Q[Cue Arbitration]
-    Q --> O[Overlay / TTS]
+    Q --> O[Overlay / Offline TTS]
 
-    A --> B[Bounded TelemetryBuffer]
-    M --> B
-    R --> B
-    B --> W[Async BatchWriter]
+    A --> T[Telemetry Ring Buffer]
+    A --> D[Durable Event Queue]
+    M --> D
+    R --> D
+    D --> W[Async BatchWriter]
+    T --> W
     W --> DB[(Room)]
 ```
 
-Normalization owns rotation, mirroring, left/right body identity, coordinate space, timestamps and units. Backpressure is bounded at both camera ingestion and storage. Neither stale frames nor database writes may accumulate into realtime latency.
+Backpressure exists independently at camera ingestion and storage. Neither stale frames nor database work may accumulate into coaching latency.
 
 ## 7. Persistence / Data Lifecycle
 
@@ -328,14 +341,16 @@ flowchart TD
     TE[Tracking / Calibration Debug Events] -->|7 days| DB
     M[Rep Metrics] -->|long-term| DB
     E[Form Events + Evidence] -->|long-term| DB
-    CT[CompactRepTrace] -->|long-term| DB
+    CT[CompactRepTrace + TraceChannels] -->|long-term| DB
     N[Daily Nutrition Context] -->|long-term| DB
     DH[DailyHealthSummary] -->|long-term| DB
-    W[WeeklyBodyComposition] -->|long-term| DB
-    H[Fine-grained Health Connect Records] -->|aggregate in memory then discard| AGG[Health Aggregator]
+    BC[WeeklyBodyComposition] -->|long-term| DB
+    H[Fine-grained Health Connect Records] -->|aggregate in memory| AGG[Health Aggregator]
     AGG --> DH
-    AGG --> W
+    AGG --> BC
     V -->|max 7 days| LF[App-private no-backup storage]
+    RW[Retention Worker] -->|startup + periodic prune| DB
+    RW -->|delete expired debug media| LF
 ```
 
 ### Retention policy
@@ -345,17 +360,15 @@ flowchart TD
 | Raw camera frame | discard immediately |
 | High-frequency pose/movement telemetry | 7 days |
 | Tracking/calibration debug events | 7 days |
-| Debug video | OFF by default; max 7 days if enabled |
-| CompactRepTrace | long-term |
+| Debug video | OFF by default; max 7 days |
+| CompactRepTrace + TraceChannel[] | long-term |
 | Rep metrics / form events / rule evidence | long-term |
 | Set/workout summaries | long-term |
 | Daily nutrition / DailyHealthSummary | long-term when present |
-| Weight/body fat | one weekly snapshot; prefer medians + sample counts |
-| Fine-grained Health Connect records | aggregate in memory; do not persist long-term |
+| Weight/body fat | weekly medians + sample counts |
+| Fine-grained Health Connect records | aggregate in memory; not durable |
 
-Full-fidelity historical re-analysis is available only inside the 7-day telemetry window. After that, old sessions support compact-trace/metric-level reinterpretation, not reconstruction of every original landmark frame.
-
-Android cloud backup of Gym Buddy personal data must be disabled. Debug media stays in app-private/no-backup storage unless explicitly exported by the user.
+Full-fidelity re-analysis is available only inside the 7-day telemetry window. Older sessions support compact-trace/metric-level reinterpretation. The retention worker enforces expiration on startup and periodically.
 
 ## MVP Scope
 
@@ -364,7 +377,7 @@ First exercise: **Incline Dumbbell Press**.
 ```text
 CameraX
 -> latest-frame scheduler
--> MediaPipe Pose
+-> bundled MediaPipe Pose
 -> coordinate normalization
 -> landmark smoothing
 -> tracking quality gate
@@ -372,13 +385,12 @@ CameraX
 -> biomechanics metrics
 -> deterministic rules
 -> cue arbitration
--> overlay/TTS
+-> overlay / offline-only TTS
 
-side path:
-analysis outputs
--> bounded TelemetryBuffer
--> asynchronous BatchWriter
--> Room
+persistence:
+raw telemetry -> TelemetryRingBuffer
+rep summaries / CompactRepTrace / metrics / events -> DurableEventQueue
+both -> asynchronous BatchWriter -> Room
 ```
 
 Initial signals: rep count; exercise-specific phases; ROM; tempo; left/right symmetry; joint/forearm orientation; wrist-path/lateral-drift proxy; tracking confidence; rule evidence.
@@ -387,17 +399,17 @@ Initial signals: rep count; exercise-specific phases; ROM; tempo; left/right sym
 
 - Android only, one user.
 - Real personal data stays on the Android device only.
-- Local-first and airplane-mode capable for workout monitoring.
-- No backend, LLM, login, or Gym Buddy cloud data path.
-- MVP SHALL NOT request `android.permission.INTERNET`.
-- Android backup/cloud backup of Gym Buddy personal data is disabled.
-- Debug media remains app-private/no-backup unless explicitly exported.
-- Exercise selection is manual.
+- No backend, LLM, login, INTERNET permission, cloud path, or personal-data export/share in MVP.
+- Pose model bundled in APK.
+- Android cloud backup disabled.
+- Debug media stays app-private/no-backup and expires within 7 days.
+- Offline TTS voice only; visual fallback otherwise.
 - ML is perception only; reasoning is deterministic code.
 - Tracking quality can veto analysis.
 - Exercise analyzers own exercise-specific state machines.
 - Cue arbitration prevents voice spam.
-- Persistence cannot block the realtime coaching path.
-- Raw/high-frequency debugging data has a 7-day window; compact historical data is retained long-term.
-- Weight/body-fat is stored weekly, not daily.
+- Persistence cannot block realtime coaching.
+- Retention cleanup is explicit and enforced.
+- Raw/high-frequency data has a 7-day window; compact history remains.
+- Weight/body-fat is weekly, not daily.
 - GitHub and Google Drive never contain real Gym Buddy personal data.
