@@ -16,8 +16,11 @@ package "gym-buddy Android App" {
   [Deterministic Rule Engine] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
+  [Telemetry Buffer\nbounded / non-blocking] as Buffer
+  [Batch Writer\noff realtime path] as BatchWriter
   [Workout Repository] as Repo
   [Health Connect Adapter] as Health
+  [Health Aggregator] as HealthAgg
   [Room Database] as Room
 }
 
@@ -34,12 +37,17 @@ Metrics --> Rules : metrics + phase + recent history
 Rules --> CuePolicy : candidate FormEvents
 CuePolicy --> Overlay : highest-priority actionable cue
 CuePolicy --> [Android TextToSpeech] : optional short cue
-Analyzer --> Repo : telemetry / rep boundaries
-Metrics --> Repo : rep metrics
-Rules --> Repo : rule evidence / FormEvents
-Health --> Repo : DailyContext / provenance
+
+Analyzer --> Buffer : telemetry / rep transitions
+Metrics --> Buffer : metrics / compact trace points
+Rules --> Buffer : rule evidence / FormEvents
+Buffer --> BatchWriter : drain batches asynchronously
+BatchWriter --> Repo : persist batch
 Repo --> Room
-UI --> Repo : history / session state
+
+Health --> HealthAgg : permitted Health Connect records
+HealthAgg --> Repo : compact daily / weekly summaries only
+UI --> Repo : history / workout state
 
 note bottom of Pose
 ML ends here.
@@ -56,9 +64,11 @@ If required joints are missing, confidence is low,
 or camera setup is invalid: DO NOT ANALYZE / DO NOT CUE.
 end note
 
-note bottom of Rules
-Rules are deterministic, versioned,
-testable, explainable, and evidence-preserving.
+note bottom of Buffer
+Persistence must never block coaching.
+The buffer is bounded and non-blocking.
+If overloaded, raw high-frequency telemetry may be dropped;
+rep summaries, metrics and FormEvents are higher priority.
 end note
 
 note bottom of CuePolicy
