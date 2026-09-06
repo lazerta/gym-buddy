@@ -4,60 +4,67 @@ Architecture source of truth for the private-use, local-first Android biomechani
 
 ## Version
 
-**v0.4 — post-review architecture candidate**
+**v0.5 — final review candidate**
 
 ## Diagrams
 
-1. `01-system-context.puml` — system boundary and external dependencies.
-2. `02-android-components.puml` — Android runtime component structure.
-3. `03-domain-model.puml` — persistent domain/data model.
-4. `04-live-analysis-sequence.puml` — frame-to-cue realtime analysis flow.
-5. `05-health-connect-sequence.puml` — optional Health Connect ingestion and aggregation flow.
-6. `06-realtime-processing-pipeline.puml` — latency/backpressure, normalization, quality gate, cue arbitration and async persistence.
-7. `07-persistence-data-lifecycle.puml` — local storage, retention, compact replay and debug-video policy.
+1. `01-system-context.puml` — local-only boundary and external dependencies.
+2. `02-android-components.puml` — Android runtime components, priority persistence lanes, Health Connect aggregation and retention enforcement.
+3. `03-domain-model.puml` — persistent domain/data model including plan/set targets, multi-exercise workouts and generic compact traces.
+4. `04-live-analysis-sequence.puml` — frame-to-cue realtime flow with async priority persistence.
+5. `05-health-connect-sequence.puml` — optional Health Connect ingestion and compact aggregation.
+6. `06-realtime-processing-pipeline.puml` — camera/storage backpressure, normalization, quality gate and cue arbitration.
+7. `07-persistence-data-lifecycle.puml` — local storage, 7-day cleanup, compact history and debug-media policy.
 
 ## Architectural invariants
 
+- Android only, single user.
 - Workout monitoring is local-first and must work in airplane mode.
-- ML is restricted to perception. MediaPipe converts camera frames into landmarks; deterministic code owns movement interpretation and coaching decisions.
-- Health Connect is optional context and never part of the realtime camera critical path.
-- No backend, LLM, account system, or Gym Buddy cloud data path exists.
 - MVP SHALL NOT request `android.permission.INTERNET`.
-- Exercise selection is explicit; the app does not spend complexity guessing the exercise.
+- The MediaPipe pose model is bundled with the APK; no runtime model download is required.
+- No backend, LLM, account/login system, Gym Buddy cloud path, or personal-data export/share feature exists in MVP.
+- ML is restricted to perception. Deterministic code owns movement interpretation and coaching decisions.
+- Health Connect is optional context and never part of the realtime camera critical path.
+- Exercise selection is explicit; the app does not guess the exercise.
 - Coordinate normalization happens before exercise-specific reasoning.
-- The realtime path uses bounded/latest-frame processing; stale camera frames must not accumulate.
+- Camera ingestion uses bounded/latest-frame processing; stale frames do not accumulate.
 - Tracking/calibration quality gates can block movement analysis and coaching cues.
 - Cue arbitration prevents multiple rules from spamming the user.
-- Persistence is outside the realtime coaching critical path through a bounded non-blocking buffer and asynchronous batch writer.
-- Under storage pressure, raw/high-frequency telemetry may be dropped before durable rep summaries, metrics, rule evidence or FormEvents.
-- Android backup/cloud backup of Gym Buddy personal data must be disabled.
-- Debug media must remain in app-private/no-backup storage unless the user explicitly exports it.
+- TTS may use only an installed voice that does not require a network connection; if none is available, feedback remains visual-only.
+- Persistence is outside the realtime coaching critical path.
+- Short-lived raw telemetry uses a bounded best-effort ring buffer.
+- Durable rep summaries, `CompactRepTrace`, final metrics, rule evidence and `FormEvent`s use a separate priority queue with reserved capacity and are drained before raw telemetry.
+- Android backup/cloud backup of Gym Buddy personal data is disabled.
+- Debug media stays in app-private/no-backup storage and is deleted after at most 7 days.
+- Retention cleanup runs on app startup and periodically, locally and without network access.
 
 ## Domain invariants
 
-- `WorkoutSession` represents one gym visit/session and contains one or more `ExerciseExecution` records.
-- Exercise-specific provenance (`analyzerVersion`, `metricVersion`, `calibrationVersion`) belongs to `ExerciseExecution`, not to the entire workout.
-- `TrainingPlan -> TrainingDay -> PlannedExercise -> ExerciseDefinition`; an `ExerciseDefinition` is reusable and independent of any one training-plan version.
-- `TelemetrySample` belongs to an `ExerciseSet` and may optionally reference a recognized `Rep`.
-- Setup motion, partial/failed reps, between-rep motion and tracking-loss periods remain representable without forcing them into a completed rep.
-- `ExerciseAnalyzer` behavior is exercise-specific; shared math/signal-processing infrastructure stays generic.
-- `CompactRepTrace` is the long-term small replay/trend artifact after full telemetry expires.
-- Full-fidelity re-analysis is guaranteed only while high-frequency telemetry remains inside the 7-day window; older data supports compact/metric-level reinterpretation only.
-- Health Connect fine-grained records are aggregation inputs, not permanent Gym Buddy records.
-- `DailyHealthSummary` stores compact daily sleep/activity/readiness context when available.
-- `WeeklyBodyComposition` stores one weekly weight/body-fat snapshot, preferably medians plus sample counts.
+- `TrainingPlan -> TrainingDay -> PlannedExercise -> PlannedSet`; `PlannedExercise` references a reusable `ExerciseDefinition`.
+- `PlannedSet` can represent per-set load percentages, rep ranges and RIR ranges; training targets are not hard-coded into analyzers.
+- Training-plan definitions are versioned; `UserProfile` points to the active plan, while `WorkoutSession` snapshots the plan id/version used for that workout.
+- `WorkoutSession` represents one gym visit and may contain many `ExerciseExecution`s.
+- Exercise-specific provenance (`analyzerVersion`, `metricVersion`, `calibrationVersion`) belongs to `ExerciseExecution`.
+- `ExerciseExecution.plannedExerciseId` and `ExerciseSet.plannedSetId` are optional so ad-hoc work remains valid.
+- `TelemetrySample` belongs to `ExerciseSet` and may optionally reference a recognized `Rep`.
+- Realtime duration timestamps use monotonic elapsed-time values, not wall-clock time.
+- `CompactRepTrace` is generic: `schemaId + TraceChannel[]`, with a fixed small normalized time axis. It is not press-specific.
+- Full-fidelity re-analysis is available only during the 7-day raw telemetry window; older sessions support compact-trace/metric-level reinterpretation.
+- Fine-grained Health Connect records are in-memory aggregation inputs, not permanent Gym Buddy records.
+- `DailyHealthSummary` stores compact daily sleep/activity context when available.
+- `WeeklyBodyComposition` stores weekly median weight/body-fat plus sample counts.
 - Missing Health Connect data never blocks workout monitoring.
 
 ## Data retention policy
 
-- Raw camera frames: discard immediately after processing.
+- Raw camera frames: discard immediately.
 - High-frequency pose/movement telemetry: retain **7 days**, then delete.
 - Tracking/calibration debug events: retain **7 days**, then delete.
-- Debug video: OFF by default; if explicitly enabled, keep at most **7 days** in app-private/no-backup storage.
+- Debug video: OFF by default; if enabled, retain at most **7 days** in app-private/no-backup storage.
 - `CompactRepTrace`, rep metrics, form events, rule evidence, set/workout summaries: retain long-term.
 - Daily nutrition context and `DailyHealthSummary`: retain long-term when present.
-- Weight/body-fat: retain only one `WeeklyBodyComposition` snapshot per week, preferably weekly medians with sample counts.
-- Fine-grained Health Connect history: aggregate in memory and do not permanently duplicate in Gym Buddy.
+- Weight/body-fat: one `WeeklyBodyComposition` per week, preferably medians plus sample counts.
+- Fine-grained Health Connect history: aggregate in memory and do not persist long-term.
 
 ## Privacy / repository boundary
 
@@ -65,7 +72,7 @@ Real personal data belongs **only on the Android device**.
 
 - GitHub: source code, architecture, tests, synthetic/anonymized fixtures only.
 - Google Drive: specs, architecture, reports without personal telemetry, and build artifacts only.
-- Android device: workout/health summaries, telemetry, metrics, form events, calibration, compact traces, and optional debug media.
+- Android device: workout/health summaries, short-lived telemetry, metrics, form events, calibration, compact traces and optional debug media.
 
 Do **not** commit or upload real health data, telemetry exports, workout recordings, sleep/weight history, nutrition logs, or debug video to GitHub or Google Drive.
 
@@ -73,12 +80,10 @@ Do **not** commit or upload real health data, telemetry exports, workout recordi
 
 First exercise: **Incline Dumbbell Press**.
 
-The first implementation must prove this path:
-
 ```text
 CameraX
 -> latest-frame scheduler
--> MediaPipe Pose
+-> bundled MediaPipe Pose
 -> coordinate normalization
 -> landmark smoothing
 -> tracking quality gate
@@ -86,13 +91,12 @@ CameraX
 -> biomechanics metrics
 -> deterministic form rules
 -> cue arbitration
--> overlay/TTS
+-> overlay / offline-only TTS
 
-side path:
-analysis outputs
--> bounded TelemetryBuffer
--> asynchronous BatchWriter
--> Room
+persistence side path:
+raw telemetry -> bounded TelemetryRingBuffer
+rep summary / compact trace / metrics / events -> DurableEventQueue
+both -> asynchronous BatchWriter -> Room
 ```
 
 Health Connect integration comes after the realtime camera path is proven and must not block it.
