@@ -4,7 +4,9 @@ Architecture source of truth for the private-use, local-first Android biomechani
 
 ## Version
 
-**v0.7 — final architecture review candidate**
+**v0.7 — ARCHITECTURE FROZEN**
+
+Fifth review result: **P0 = 0, P1 = 0**. Remaining choices are implementation/spec/test concerns and do not justify further UML changes.
 
 ## Diagrams
 
@@ -101,4 +103,4 @@ rep summaries / CompactRepTrace / final metrics / FormEvent+FormEvidence / CueDe
 both -> async BatchWriter -> Room
 ```
 
-Exact queue capacities, cleanup cadence, Health Connect aggregation windows, exercise-specific compact trace channels, rule thresholds and cue cooldowns belong to the SPEC/test layer, not UML.
+Exact queue capacities, cleanup cadence, Health Connect aggregation windows/timezone rules, exercise-specific compact trace channels, rule thresholds, cue cooldowns, Room encodings, and crash-consistency tolerances belong to the SPEC/test layer, not UML.
