@@ -14,6 +14,22 @@ class TrainingPlan {
   version: Int
 }
 
+class TrainingDay {
+  id: String
+  dayOfWeek: Int
+  displayName: String
+  order: Int
+}
+
+class PlannedExercise {
+  id: String
+  exerciseId: String
+  order: Int
+  targetSets: Int
+  repRangeMin: Int?
+  repRangeMax: Int?
+}
+
 class ExerciseDefinition {
   id: String
   displayName: String
@@ -39,36 +55,41 @@ class DailyContext {
   preWorkoutCarbsG: Double?
   waterMl: Int?
   sodiumMg: Int?
+}
+
+class DailyHealthSummary {
+  date: LocalDate
   sleepMinutes: Int?
   sleepQuality: Int?
+  restingHeartRateBpm: Double?
+  steps: Long?
+  activeCaloriesKcal: Double?
+  sourceSummary: String?
 }
 
 class WeeklyBodyComposition {
   weekStart: LocalDate
-  weightKg: Double?
-  bodyFatPct: Double?
-  aggregation: String
+  medianWeightKg: Double?
+  weightSampleCount: Int
+  medianBodyFatPct: Double?
+  bodyFatSampleCount: Int
   sourceSummary: String?
-  measuredAtRepresentative: Instant?
-}
-
-class HealthSample {
-  sourceApp: String
-  sourceDevice: String?
-  type: HealthMetricType
-  value: Double
-  unit: String
-  measuredAt: Instant
-  lastSyncedAt: Instant
 }
 
 class WorkoutSession {
   id: UUID
   startedAt: Instant
   endedAt: Instant?
-  exerciseId: String
   appBuild: String
   poseModelVersion: String
+}
+
+class ExerciseExecution {
+  id: UUID
+  exerciseId: String
+  order: Int
+  startedAt: Instant
+  endedAt: Instant?
   analyzerVersion: Int
   metricVersion: Int
   calibrationVersion: Int?
@@ -123,50 +144,78 @@ class FormEvent {
   cue: String
 }
 
+class CompactRepTrace {
+  traceVersion: Int
+  pointCount: Int
+  normalizedTime: Float[]
+  leftElbowAngle: Float[]
+  rightElbowAngle: Float[]
+  leftWristX: Float[]
+  leftWristY: Float[]
+  rightWristX: Float[]
+  rightWristY: Float[]
+}
+
 UserProfile "1" -- "1" TrainingPlan
-TrainingPlan "1" -- "1..*" ExerciseDefinition
+TrainingPlan "1" *-- "1..*" TrainingDay
+TrainingDay "1" *-- "1..*" PlannedExercise
+PlannedExercise "0..*" --> "1" ExerciseDefinition : references >
 UserProfile "1" -- "0..*" CalibrationProfile
 ExerciseDefinition "1" -- "0..*" CalibrationProfile
 UserProfile "1" -- "0..*" DailyContext
+UserProfile "1" -- "0..*" DailyHealthSummary
 UserProfile "1" -- "0..*" WeeklyBodyComposition
-DailyContext "1" *-- "0..*" HealthSample
-DailyContext "1" -- "0..*" WorkoutSession : contextualizes >
-ExerciseDefinition "1" -- "0..*" WorkoutSession
-WorkoutSession "1" *-- "1..*" ExerciseSet
+UserProfile "1" -- "0..*" WorkoutSession
+WorkoutSession "0..*" --> "0..1" DailyContext : optional nutrition context >
+WorkoutSession "0..*" --> "0..1" DailyHealthSummary : optional health context >
+WorkoutSession "1" *-- "1..*" ExerciseExecution
+ExerciseExecution "0..*" --> "1" ExerciseDefinition : executes >
+ExerciseExecution "1" *-- "1..*" ExerciseSet
 ExerciseSet "1" *-- "0..*" TelemetrySample
 ExerciseSet "1" *-- "0..*" TrackingEvent
 ExerciseSet "1" *-- "0..*" Rep
 Rep "0..1" <-- "0..*" TelemetrySample : optional repId
 Rep "1" *-- "0..*" RepMetric
 Rep "1" *-- "0..*" FormEvent
+Rep "1" *-- "0..1" CompactRepTrace
+
+note right of ExerciseExecution
+Exercise-specific provenance belongs here,
+not on WorkoutSession.
+One workout may contain many exercises using
+different analyzers/calibrations.
+end note
 
 note right of TelemetrySample
 Telemetry belongs to the set, not only to a Rep.
 Retain high-frequency samples for 7 days only.
-This preserves setup, between-rep motion, partial reps,
-failed reps, and tracking-loss periods for short-term debugging.
+Setup, partial reps and tracking loss remain debuggable
+without forcing them into a completed Rep.
+end note
+
+note right of CompactRepTrace
+Long-term compact replay artifact.
+Use a fixed small number of normalized points per rep.
+Full-fidelity re-analysis is limited to the 7-day telemetry window;
+older sessions support compact/metric-level reinterpretation only.
+end note
+
+note right of DailyHealthSummary
+Aggregate Health Connect records locally.
+Do not persist fine-grained HR/step/source records long-term.
+Missing health data never blocks workout tracking.
 end note
 
 note right of WeeklyBodyComposition
-Store one compact snapshot per week.
-Prefer weekly median of valid weight/body-fat measurements.
-Do not retain every daily body-composition reading in Gym Buddy.
+One compact snapshot per week.
+Prefer medians of valid measurements and retain sample counts.
+Do not retain every daily weight/body-fat reading in Gym Buddy.
 end note
 
 note right of FormEvent
 Never store only a score.
 Persist rule id/version, confidence,
 exact observed evidence, and cue.
-end note
-
-note right of WorkoutSession
-Persist provenance so historical compact data
-can be interpreted after algorithms change.
-end note
-
-note right of HealthSample
-Keep source + measurement time + sync time while cached.
-Avoid permanent duplication of fine-grained Health Connect history.
 end note
 
 @enduml
