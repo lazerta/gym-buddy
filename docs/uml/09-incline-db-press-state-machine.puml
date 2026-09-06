@@ -1,0 +1,66 @@
+@startuml
+!theme plain
+skinparam shadowing false
+
+[*] --> ACQUIRING_START
+
+ACQUIRING_START --> TOP : stable top/start posture acquired\ntracking valid for dwell window
+TOP --> ECCENTRIC : sustained elbow flexion trend\n+ body-local wrist descent/toward-torso trend
+ECCENTRIC --> BOTTOM : sufficient descent/ROM evidence\n+ local minimum / velocity reversal evidence
+BOTTOM --> CONCENTRIC : sustained elbow extension trend\n+ body-local wrist ascent/away-from-torso trend
+CONCENTRIC --> REP_COMPLETE : TOP reacquired\n+ minimum ROM satisfied\n+ minimum rep duration satisfied
+REP_COMPLETE --> TOP : increment rep count once\nstart next-cycle observation
+
+ECCENTRIC --> TOP : early reversal before valid bottom\nABORTED/PARTIAL; no rep count
+CONCENTRIC --> ACQUIRING_START : sustained reversal/failure before top\nFAILED/PARTIAL; no rep count
+BOTTOM --> ACQUIRING_START : movement becomes indeterminate\nbefore valid concentric phase
+
+TOP --> ACQUIRING_START : material setup/view change
+ECCENTRIC --> ACQUIRING_START : TemporalResetCoordinator reset
+BOTTOM --> ACQUIRING_START : TemporalResetCoordinator reset
+CONCENTRIC --> ACQUIRING_START : TemporalResetCoordinator reset
+REP_COMPLETE --> ACQUIRING_START : TemporalResetCoordinator reset
+
+note right of ACQUIRING_START
+Do not infer a rep phase immediately after tracking recovery or setup change.
+Acquire a fresh stable movement state before counting again.
+end note
+
+note right of TOP
+TOP is exercise-specific and configuration-aware.
+Do not define it with one universal elbow-angle magic number.
+Use calibrated/configured evidence plus stability/hysteresis.
+end note
+
+note right of ECCENTRIC
+Primary evidence combines trends rather than one coordinate:
+- elbow flexion trend,
+- body-local wrist trajectory,
+- velocity direction,
+- confidence-qualified landmarks.
+end note
+
+note right of BOTTOM
+BOTTOM is supported by local movement evidence such as a sufficiently deep
+descent and direction/velocity reversal, with hysteresis and minimum dwell.
+Thresholds belong in rule/analyzer config and tests.
+end note
+
+note right of CONCENTRIC
+A grinder may remain CONCENTRIC while velocity is low if direction remains
+consistent and tracking is valid. Do not fail a rep merely because it is slow.
+end note
+
+note right of REP_COMPLETE
+Count exactly once only after a valid full sequence reaches a stable TOP
+with minimum ROM and duration satisfied. RepFinalizationBundle is then emitted.
+end note
+
+note bottom
+Any significant tracking gap, material camera/view transform change,
+exercise/setup parameter change, or explicit TemporalResetCoordinator event
+invalidates the current temporal rep state and returns to ACQUIRING_START.
+The interrupted rep is never resumed across the discontinuity.
+end note
+
+@enduml
