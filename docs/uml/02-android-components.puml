@@ -7,7 +7,7 @@ package "gym-buddy Android App" {
   [Compose UI] as UI
   [Camera Controller\n(CameraX)] as Camera
   [Frame Scheduler\nlatest-frame / backpressure] as Scheduler
-  [Pose Perception\n(MediaPipe)] as Pose
+  [Pose Perception\n(MediaPipe, bundled model)] as Pose
   [Coordinate Normalizer] as Normalize
   [Signal Processor\nSmoothing / velocity] as Signal
   [Tracking Quality Gate] as Quality
@@ -16,11 +16,13 @@ package "gym-buddy Android App" {
   [Deterministic Rule Engine] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
   [Live Overlay] as Overlay
-  [Telemetry Buffer\nbounded / non-blocking] as Buffer
+  [Telemetry Ring Buffer\nbounded / drop-oldest] as TelemetryBuffer
+  [Durable Event Queue\nreserved priority lane] as DurableQueue
   [Batch Writer\noff realtime path] as BatchWriter
   [Workout Repository] as Repo
   [Health Connect Adapter] as Health
   [Health Aggregator] as HealthAgg
+  [Retention Worker\nstartup + periodic cleanup] as Retention
   [Room Database] as Room
 }
 
@@ -36,22 +38,27 @@ Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + recent history
 Rules --> CuePolicy : candidate FormEvents
 CuePolicy --> Overlay : highest-priority actionable cue
-CuePolicy --> [Android TextToSpeech] : optional short cue
+CuePolicy --> [Android TextToSpeech] : offline voice only; otherwise visual fallback
 
-Analyzer --> Buffer : telemetry / rep transitions
-Metrics --> Buffer : metrics / compact trace points
-Rules --> Buffer : rule evidence / FormEvents
-Buffer --> BatchWriter : drain batches asynchronously
-BatchWriter --> Repo : persist batch
+Analyzer --> TelemetryBuffer : raw telemetry / transient tracking data
+Analyzer --> DurableQueue : completed rep summary + CompactRepTrace
+Metrics --> DurableQueue : durable final rep metrics
+Rules --> DurableQueue : rule evidence / FormEvents
+TelemetryBuffer --> BatchWriter : best-effort batches
+DurableQueue --> BatchWriter : priority durable batches
+BatchWriter --> Repo : persist transaction
 Repo --> Room
 
 Health --> HealthAgg : permitted Health Connect records
 HealthAgg --> Repo : compact daily / weekly summaries only
+Retention --> Repo : delete expired 7-day Room records
+Retention --> [App-private no-backup files] : delete expired debug media
 UI --> Repo : history / workout state
 
 note bottom of Pose
 ML ends here.
 Everything downstream is deterministic code.
+The pose model is bundled; no runtime network download.
 end note
 
 note bottom of Scheduler
@@ -64,17 +71,27 @@ If required joints are missing, confidence is low,
 or camera setup is invalid: DO NOT ANALYZE / DO NOT CUE.
 end note
 
-note bottom of Buffer
-Persistence must never block coaching.
-The buffer is bounded and non-blocking.
-If overloaded, raw high-frequency telemetry may be dropped;
-rep summaries, metrics and FormEvents are higher priority.
+note bottom of TelemetryBuffer
+Raw/high-frequency data is best-effort.
+Drop oldest raw telemetry under pressure.
+Never let it block coaching.
+end note
+
+note bottom of DurableQueue
+Reserve capacity for rep summaries, compact traces,
+metrics and FormEvents. Drain before raw telemetry.
+Do not intentionally drop durable records during normal operation.
+end note
+
+note bottom of Retention
+Run cleanup on app startup and periodically.
+Delete telemetry/tracking/debug media older than 7 days.
 end note
 
 note bottom of CuePolicy
 Multiple simultaneous issues must not create cue spam.
-Apply severity/priority, persistence, cooldown,
-and max-cues-per-rep/set policy.
+TTS must use a locally installed non-network voice;
+if unavailable, use visual feedback only.
 end note
 
 @enduml
