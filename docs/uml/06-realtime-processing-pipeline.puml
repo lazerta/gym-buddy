@@ -4,91 +4,101 @@ skinparam shadowing false
 left to right direction
 
 rectangle "CameraX" as Camera
-rectangle "Frame Scheduler" as Scheduler
+rectangle "Latest-frame Scheduler" as Scheduler
 rectangle "MediaPipe Pose" as Pose
+rectangle "Ordered Result Gate" as Ordered
+rectangle "Serialized Analysis Lane" as Lane
 rectangle "Telemetry Sampler + Chunker" as TelemetryStage
 rectangle "Coordinate Normalizer" as Normalize
-rectangle "Landmark Smoother" as Smooth
+rectangle "Confidence-aware Signal Processor" as Signal
 rectangle "Tracking Quality Gate" as Gate
+rectangle "Temporal Reset Coordinator" as Reset
 rectangle "Exercise Analyzer" as Analyzer
 rectangle "Biomechanics Metrics" as Metrics
 rectangle "Rule Engine + Episode Tracker" as Rules
 rectangle "Cue Arbitrator" as Cue
-rectangle "Overlay / TTS" as Output
+rectangle "Rep Finalization Assembler" as RepFinalize
+rectangle "Overlay / Offline TTS" as Output
 queue "Short-lived Telemetry Buffer\nbounded / best-effort" as TelemetryQ
 queue "Priority Persistence Queue\nbounded / reserved capacity" as PriorityQ
-rectangle "Batch Writer" as Writer
+rectangle "Serialized Batch Writer\ncommandSequence ordered" as Writer
 database "Room / SQLite" as Room
 
 Camera --> Scheduler : frame + monotonic timestamp
 Scheduler --> Pose : newest eligible frame only
-Pose --> TelemetryStage : PoseObservation\nno image bytes
+Pose --> Ordered : pose result + source timestamp
+Ordered --> Lane : strictly increasing timestamps only
+Ordered --> Ordered : discard late/out-of-order result
+Lane --> TelemetryStage : ordered PoseObservation\nno image bytes
 TelemetryStage --> TelemetryQ : bounded-rate PoseObservationChunk
-Pose --> Normalize : landmarks + visibility/presence
-Normalize --> Smooth : canonical L/R + coordinate space
-Smooth --> Gate : MovementFrame
+Lane --> Normalize : ordered pose result
+Normalize --> Signal : canonical coordinates
+Signal --> Gate : smoothed MovementFrame
 Gate --> Analyzer : valid tracking only
 Gate --> Output : setup/tracking guidance
-Gate --> TelemetryQ : TrackingEvent on state changes
-Analyzer --> Metrics : phase + temporal state
+Gate --> TelemetryQ : TrackingEvent on meaningful state changes
+Gate --> Reset : significant temporal discontinuity
+Reset --> Signal : reset filter / velocity state
+Reset --> Analyzer : reset rep temporal state
+Reset --> Metrics : reset ROM / tempo / path accumulators
+Reset --> Rules : interrupt/reset temporal episodes
+Reset --> RepFinalize : invalidate current trace/finalization state
+
+Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + confidence
 Rules --> Rules : PENDING / ACTIVE / FINALIZED episodes
 Rules --> Cue : active actionable issue state
-
-Analyzer --> PriorityQ : completed/partial rep summary / CompactRepTrace
-Metrics --> PriorityQ : final rep metrics
-Rules --> PriorityQ : FormEvent activation/finalization + evidence upsert
-Cue --> PriorityQ : CueDelivery only when delivered
-PriorityQ --> Writer : persist first
-TelemetryQ --> Writer : best-effort short-lived batches
-Writer --> Room : transactions
 Cue --> Output : selected actionable cue
 
-note bottom of Scheduler
-Use newest eligible frames; never let a camera backlog grow.
+Analyzer --> RepFinalize : final rep/partial-rep state
+Metrics --> RepFinalize : final RepMetric[]
+Rules --> RepFinalize : rep-scoped episode finalizations
+RepFinalize --> PriorityQ : atomic RepFinalizationBundle
+Rules --> PriorityQ : revisioned set-scoped FormEvent updates
+Cue --> PriorityQ : CueDelivery only when delivered
+PriorityQ --> Writer : priority commands in sequence order
+TelemetryQ --> Writer : best-effort short-lived batches
+Writer --> Room : serialized transactions
+
+note bottom of Ordered
+Inference completion order is not trusted.
+Only strictly newer source timestamps may enter stateful analysis.
+end note
+
+note bottom of Lane
+Normalizer, signal processing, quality gating, analyzer, metrics and rules
+share one serialized temporal lane per active set.
+end note
+
+note bottom of Signal
+Low-confidence/missing landmarks are not treated as valid filter updates.
+Confidence-aware filtering prevents garbage from contaminating temporal state.
+end note
+
+note bottom of Reset
+Tracking gaps, material camera/view changes, or exercise/setup reconfiguration
+reset all stateful temporal consumers together.
 end note
 
 note bottom of TelemetryStage
 Realtime analysis FPS and persisted observation rate are independent.
-Sample by monotonic time and encode multiple observations per versioned chunk.
-Exact sample rate/chunk size/codec are implementation-spec decisions.
+Sample by monotonic time and chunk multiple observations into a versioned payload.
 end note
 
-note bottom of Pose
-PoseObservation is captured before normalization/smoothing so recent
-replay can re-run downstream deterministic stages. It contains only
-pose outputs + frame transform metadata, never camera image bytes.
-end note
-
-note bottom of Gate
-Reject analysis for missing required landmarks, low confidence,
-unsuitable camera view, or temporal discontinuity.
-Emit short-lived TrackingEvent only on meaningful state transitions,
-not every invalid frame.
-end note
-
-note bottom of Rules
-A continuous issue is one FormEvent episode, not one event/frame.
-PENDING stays in memory; ACTIVE and FINALIZED states are persisted
-with the same event id.
-end note
-
-note bottom of Cue
-A detected FormEvent may be suppressed from feedback.
-Only actual visual/TTS feedback creates CueDelivery.
-TTS is offline-voice-only.
-end note
-
-note bottom of TelemetryQ
-Best-effort means recent replay may have sampling gaps or dropped chunks
-under storage pressure. Dropping short-lived observations is preferable
-to delaying coaching.
+note bottom of RepFinalize
+RepFinalizationBundle groups Rep + final metrics + optional CompactRepTrace
++ rep-scoped FormEvent finalizations for one atomic Room transaction.
 end note
 
 note bottom of PriorityQ
-PriorityPersistenceQueue is an in-memory scheduling lane.
-It is not durable by itself; Room commit creates durability.
-SetCloseBarrier is a reserved priority control item used on normal Stop Set.
+Commands have monotonic commandSequence values.
+FormEvent writes carry monotonic eventRevision values.
+SetCloseBarrier is reserved/non-droppable and uses a highWatermark.
+end note
+
+note bottom of TelemetryQ
+Best-effort short-lived telemetry may have sampling gaps under pressure.
+Dropping it is preferable to delaying coaching.
 end note
 
 @enduml
