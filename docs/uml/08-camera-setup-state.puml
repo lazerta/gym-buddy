@@ -16,10 +16,10 @@ SetupGuidance --> SetupChecking : user repositions phone/body
 SetupChecking --> Ready : setup valid for stability window
 
 Ready --> ActiveSet : user taps Start Set
-ActiveSet --> TrackingDegraded : quality gate invalid beyond debounce
-TrackingDegraded --> ActiveSet : quality valid for recovery window
+ActiveSet --> TrackingDegraded : invalid tracking exceeds tolerated gap
+TrackingDegraded --> ActiveSet : quality valid for recovery window\nrestart from stable movement state
 TrackingDegraded --> RepositionRequired : invalid persists
-RepositionRequired --> ActiveSet : setup recovers and stabilizes
+RepositionRequired --> ActiveSet : setup recovers and stabilizes\nrestart from stable movement state
 
 ActiveSet --> Finalizing : user taps Stop Set
 TrackingDegraded --> Finalizing : user taps Stop Set
@@ -44,14 +44,19 @@ end note
 note right of TrackingDegraded
 Do not advance rep state, evaluate biomechanics form rules,
 or deliver form cues while tracking quality is invalid.
-Camera/setup guidance may still be shown.
-Short-lived TrackingEvent records meaningful state transitions.
+When the tolerated tracking-gap window is exceeded:
+- invalidate/reset the current in-progress rep temporal state,
+- finalize/reset active FormEvent episodes with tracking-gap reason,
+- record a short-lived TrackingEvent transition.
+Recovery starts a fresh movement-state acquisition; it does not
+continue the interrupted rep as though the gap never happened.
 end note
 
 note right of RepositionRequired
 A prolonged invalid state should prefer clear reposition guidance
 over repeated form coaching. Recovery is automatic once the setup
-is valid again for the configured recovery window.
+is valid again for the configured recovery window, but rep/rule
+state restarts from a stable baseline.
 end note
 
 note right of Finalizing
