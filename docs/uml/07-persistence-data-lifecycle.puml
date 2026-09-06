@@ -7,27 +7,30 @@ rectangle "Pose / Movement Telemetry" as Telemetry
 rectangle "Tracking / Calibration Debug Events" as Tracking
 rectangle "Rep Metrics" as Metrics
 rectangle "Form Events + Rule Evidence" as Events
-rectangle "CompactRepTrace\nnormalized small rep trace" as CompactTrace
+rectangle "CompactRepTrace\n+ generic TraceChannel[]" as CompactTrace
 rectangle "Daily Nutrition Context" as Nutrition
 rectangle "DailyHealthSummary" as DailyHealth
 rectangle "WeeklyBodyComposition" as Weekly
 rectangle "Health Connect Fine-grained Records\nprocessing input only" as Health
 rectangle "Health Aggregator\nin-memory" as HealthAgg
 rectangle "Debug Video\nopt-in only" as Video
-rectangle "Telemetry Buffer\nbounded" as Buffer
+queue "Telemetry Ring Buffer" as TelemetryQ
+queue "Durable Event Queue" as DurableQ
 rectangle "Batch Writer" as Writer
+rectangle "Retention Worker\nstartup + periodic" as Retention
 database "Room / SQLite" as Room
 rectangle "App-private no-backup storage" as Files
 
 Frame --> Telemetry : infer pose
 Frame --> Video : explicit debug mode only
-Frame --> Frame : discard immediately after processing
-Telemetry --> Buffer : best-effort raw samples
-Tracking --> Buffer : short-term debug events
-Metrics --> Buffer : durable derived metrics
-Events --> Buffer : durable evidence/events
-CompactTrace --> Buffer : durable compact trace
-Buffer --> Writer : asynchronous batches
+Frame --> Frame : discard immediately
+Telemetry --> TelemetryQ : best-effort short-lived samples
+Tracking --> TelemetryQ : short-lived debug events
+Metrics --> DurableQ : long-term derived metrics
+Events --> DurableQ : long-term evidence/events
+CompactTrace --> DurableQ : long-term generic compact trace
+DurableQ --> Writer : priority batches
+TelemetryQ --> Writer : best-effort batches
 Writer --> Room
 
 Nutrition --> Room : long-term compact daily context
@@ -37,24 +40,20 @@ HealthAgg --> Weekly : weekly medians + counts
 DailyHealth --> Room : long-term
 Weekly --> Room : long-term
 HealthAgg --> HealthAgg : discard fine-grained inputs
-Video --> Files : retain <= 7 days
+Video --> Files : <= 7 days
+Retention --> Room : prune expired telemetry/tracking data
+Retention --> Files : delete expired debug media
 
 note right of Telemetry
-High-frequency raw movement telemetry is a short-term
+High-frequency movement telemetry is a short-term
 full-fidelity debug/re-analysis window only.
 Delete after 7 days.
 end note
 
-note right of Tracking
-Retain tracking/calibration debug events for 7 days,
-then delete.
-end note
-
 note right of CompactTrace
-Retain long-term as a small standardized trace,
-for example a fixed number of normalized points per rep.
-This supports trend comparison and approximate reinterpretation
-after full telemetry has expired.
+Retain a small generic standardized trace long-term.
+Use schemaId + typed channels so every exercise can define
+its own compact signals without press-specific fields.
 end note
 
 note right of Weekly
@@ -67,19 +66,19 @@ note right of Video
 OFF by default.
 App-private/no-backup storage only.
 Delete after at most 7 days.
-Manual export is the only allowed path out of the app sandbox.
+MVP provides no personal-data export/share feature.
 end note
 
-note bottom of Buffer
-Persistence is off the coaching critical path.
-Under pressure, raw telemetry may be dropped first;
-durable rep summaries/metrics/events must be prioritized.
+note bottom of Retention
+Run cleanup on app startup and periodically.
+Records/files older than the 7-day boundary are removed.
+Retention enforcement is local and requires no network.
 end note
 
 note bottom of Room
 Real personal data stays on-device only.
 Android cloud backup must be disabled.
-No automatic export/sync path to GitHub or Google Drive.
+No automatic or user-facing personal-data export in MVP.
 end note
 
 @enduml
