@@ -6,7 +6,8 @@ rectangle "Camera Frame" as Frame
 rectangle "Pose / Movement Telemetry" as Telemetry
 rectangle "Tracking / Calibration Debug Events" as Tracking
 rectangle "Rep Metrics" as Metrics
-rectangle "Form Events + Rule Evidence" as Events
+rectangle "FormEvent + FormEvidence[]" as Events
+rectangle "CueDelivery\nactual feedback only" as CueDelivery
 rectangle "CompactRepTrace\n+ generic TraceChannel[]" as CompactTrace
 rectangle "Daily Nutrition Context" as Nutrition
 rectangle "DailyHealthSummary" as DailyHealth
@@ -27,7 +28,8 @@ Frame --> Frame : discard immediately
 Telemetry --> TelemetryQ : best-effort short-lived samples
 Tracking --> TelemetryQ : short-lived debug events
 Metrics --> DurableQ : long-term derived metrics
-Events --> DurableQ : long-term evidence/events
+Events --> DurableQ : structured long-term rule evidence
+CueDelivery --> DurableQ : long-term actual feedback record
 CompactTrace --> DurableQ : long-term generic compact trace
 DurableQ --> Writer : priority batches
 TelemetryQ --> Writer : best-effort batches
@@ -41,13 +43,24 @@ DailyHealth --> Room : long-term
 Weekly --> Room : long-term
 HealthAgg --> HealthAgg : discard fine-grained inputs
 Video --> Files : <= 7 days
-Retention --> Room : prune expired telemetry/tracking data
+Retention --> Room : prune sets whose telemetryExpiresAt passed
 Retention --> Files : delete expired debug media
 
 note right of Telemetry
 High-frequency movement telemetry is a short-term
 full-fidelity debug/re-analysis window only.
-Delete after 7 days.
+ExerciseSet.telemetryExpiresAt is the purge anchor.
+end note
+
+note right of Events
+FormEvent records a detected issue.
+FormEvidence[] stores structured observed/threshold facts.
+Do not use one opaque evidence JSON blob as the source of truth.
+end note
+
+note right of CueDelivery
+CueDelivery records only feedback actually shown/spoken.
+Suppressed FormEvents have no CueDelivery.
 end note
 
 note right of CompactTrace
@@ -56,23 +69,16 @@ Use schemaId + typed channels so every exercise can define
 its own compact signals without press-specific fields.
 end note
 
-note right of Weekly
-One snapshot per week.
-Prefer medians of valid weight/body-fat measurements.
-Persist sample counts and source summary.
-end note
-
 note right of Video
 OFF by default.
 App-private/no-backup storage only.
-Delete after at most 7 days.
 MVP provides no personal-data export/share feature.
 end note
 
 note bottom of Retention
 Run cleanup on app startup and periodically.
-Records/files older than the 7-day boundary are removed.
-Retention enforcement is local and requires no network.
+Expired data is ineligible for normal reads at telemetryExpiresAt;
+physical purge follows through local cleanup jobs.
 end note
 
 note bottom of Room
