@@ -9,87 +9,100 @@ participant "WorkoutSessionController" as Session
 participant "CameraX" as Camera
 participant "LatestFrameScheduler" as Scheduler
 participant "MediaPipe Pose" as Pose
+participant "OrderedResultGate" as Ordered
+participant "SerializedAnalysisLane" as Lane
 participant "TelemetrySamplerChunker" as TelemetryStage
 participant "CoordinateNormalizer" as Normalize
 participant "SignalProcessor" as Signal
 participant "TrackingQualityGate" as Gate
+participant "TemporalResetCoordinator" as Reset
 participant "InclineDbPressAnalyzer" as Analyzer
 participant "BiomechanicsMetrics" as Metrics
 participant "RuleEngine + EpisodeTracker" as Rules
 participant "CueArbitrator" as Cue
+participant "RepFinalizationAssembler" as RepFinalize
 queue "ShortLivedTelemetryBuffer" as TelemetryQ
 queue "PriorityPersistenceQueue" as PriorityQ
-participant "BatchWriter" as Writer
+participant "SerializedBatchWriter" as Writer
 participant "WorkoutRepository" as Repo
 database "Room / SQLite" as DB
 
 Shawn -> UI : select Incline Dumbbell Press
 Shawn -> UI : Start Set
 UI -> Session : startSet()
-Session -> Repo : create ACTIVE ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days
+Session -> Repo : create ACTIVE ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days\nstartedAtElapsedNanos = monotonic origin
 Repo -> DB : persist set state
 Session -> Camera : start accepting frames
 
-loop each camera frame
+loop camera stream
   Camera -> Scheduler : frame + monotonic timestamp
   Scheduler -> Pose : newest eligible frame
-  Pose -> TelemetryStage : PoseObservation\nlandmarks + transform metadata only
-  TelemetryStage -> TelemetryStage : bounded-rate sample + chunk
-  opt chunk ready
-    TelemetryStage -> TelemetryQ : PoseObservationChunk
-  end
-  Pose --> Normalize : same pose output
-  Normalize --> Signal : canonical coordinates
-  Signal --> Gate : MovementFrame
-  alt tracking invalid
-    Gate --> UI : setup / visibility guidance
-    Gate -> TelemetryQ : TrackingEvent on meaningful state change
-    alt invalid gap exceeds tolerated duration
-      Gate -> Analyzer : resetTemporalState(TRACKING_GAP)
-      Gate -> Rules : interruptActiveEpisodes(TRACKING_GAP)
-      Rules -> PriorityQ : FormEvent upserts with status=INTERRUPTED
+  Pose --> Ordered : pose result + source timestamp
+  alt timestamp <= lastProcessedTimestamp
+    Ordered -> Ordered : discard late/out-of-order result
+  else strictly newer
+    Ordered -> Lane : enqueue ordered result
+    Lane -> TelemetryStage : ordered PoseObservation\nno image bytes
+    TelemetryStage -> TelemetryStage : bounded-rate sample + chunk
+    opt chunk ready
+      TelemetryStage -> TelemetryQ : PoseObservationChunk
     end
-  else valid
-    Gate --> Analyzer : valid frame
-    Analyzer -> Analyzer : update rep state
-    Analyzer -> Metrics : calculate metrics
-    Metrics -> Rules : metrics + phase + recent history
-    Rules -> Rules : update rule episode states\nPENDING / ACTIVE / FINALIZED
+    Lane -> Normalize : ordered pose output
+    Normalize -> Signal : canonical coordinates
+    Signal -> Gate : confidence-aware smoothed MovementFrame
 
-    alt issue crosses persistence threshold
-      Rules -> PriorityQ : activate FormEvent + initial FormEvidence
-    end
-    alt active issue updates materially or finalizes
-      Rules -> PriorityQ : upsert same FormEvent id + final evidence/end
-    end
-
-    Rules --> Cue : active actionable issue state
-    alt CueArbitrator selects feedback
-      Cue --> UI : one prioritized visual cue
-      opt offline TTS voice available
-        Cue --> UI : speak same short cue via local TTS
+    alt tracking invalid
+      Gate --> UI : setup / visibility guidance
+      Gate -> TelemetryQ : TrackingEvent on meaningful state transition
+      alt invalid gap exceeds tolerated duration
+        Gate -> Reset : reset(TRACKING_GAP)
+        Reset -> Signal : clear filter / velocity state
+        Reset -> Analyzer : invalidate current rep temporal state
+        Reset -> Metrics : clear ROM / tempo / trajectory accumulators
+        Reset -> Rules : interrupt active temporal episodes
+        Reset -> RepFinalize : invalidate current trace builder state
+        Rules -> PriorityQ : revisioned FormEvent INTERRUPTED upserts
       end
-      Cue -> PriorityQ : CueDelivery
-    else issue suppressed by priority/cooldown
-      Cue --> Cue : no delivery record
-    end
+    else tracking valid
+      Gate --> Analyzer : valid frame
+      Analyzer -> Analyzer : update exercise-specific rep state
+      Analyzer -> Metrics : update metrics
+      Metrics -> Rules : metrics + phase + recent history
+      Rules -> Rules : update issue episodes\nPENDING / ACTIVE / FINALIZED
 
-    alt rep completed
-      Analyzer --> UI : increment rep count
-      Analyzer -> PriorityQ : rep summary + CompactRepTrace
-      Metrics -> PriorityQ : final rep metrics
-      Rules -> PriorityQ : finalize any rep-scoped active episodes
+      alt issue activates or materially changes/finalizes
+        Rules -> PriorityQ : revisioned FormEvent + FormEvidence upsert
+      end
+
+      Rules --> Cue : active actionable issue state
+      alt CueArbitrator selects feedback
+        Cue --> UI : one prioritized visual cue
+        opt offline TTS voice available
+          Cue --> UI : speak same short cue via local TTS
+        end
+        Cue -> PriorityQ : CueDelivery
+      else suppressed by priority/cooldown
+        Cue --> Cue : no CueDelivery
+      end
+
+      alt rep completed or partial rep finalized
+        Analyzer -> RepFinalize : rep state / completion state
+        Metrics -> RepFinalize : final RepMetric[]
+        Rules -> RepFinalize : rep-scoped FormEvent finalizations
+        RepFinalize -> PriorityQ : RepFinalizationBundle\n(one atomic priority command)
+        Analyzer --> UI : increment count only for COMPLETED rep
+      end
     end
   end
 end
 
-loop async priority persistence
-  PriorityQ -> Writer : next priority batch
-  Writer -> Repo : persist / upsert
-  Repo -> DB : transaction
+loop async serialized priority persistence
+  PriorityQ -> Writer : next commandSequence
+  Writer -> Repo : persist/upsert in command order
+  Repo -> DB : transaction\nreject stale FormEvent eventRevision
 end
 loop async short-lived telemetry persistence
-  TelemetryQ -> Writer : next best-effort batch
+  TelemetryQ -> Writer : best-effort telemetry batch when priority lane permits
   Writer -> Repo : persist PoseObservationChunk / TrackingEvent
   Repo -> DB : transaction
 end
@@ -97,59 +110,51 @@ end
 Shawn -> UI : Stop Set
 UI -> Session : stopSet()
 Session -> Camera : stop accepting new frames
-Session -> Scheduler : await in-flight analysis quiescence
-Scheduler --> Session : pipeline idle
+Session -> Session : await full pipeline quiescence\n(no in-flight inference, ordered result, or analysis work)
 Session -> TelemetryStage : flush partial short-lived chunk best-effort
 TelemetryStage -> TelemetryQ : optional final PoseObservationChunk
-Session -> Analyzer : finalizeSet()\nclose partial/in-progress rep state
-Analyzer -> PriorityQ : partial/aborted rep summary if applicable
-Session -> Rules : finalizeSet()\nclose all active FormEvent episodes
-Rules -> PriorityQ : final FormEvent upserts
-Session -> PriorityQ : enqueue SetCloseBarrier\nendedAt + status=COMPLETED\ntelemetryExpiresAt = endedAt + 7 days
-PriorityQ -> Writer : drain earlier priority records, then barrier
-Writer -> Repo : commit pending priority data + close set
+Session -> Analyzer : finalizeSet()
+Session -> Metrics : finalizeSet()
+Session -> Rules : finalizeSet()
+Analyzer -> RepFinalize : partial/aborted rep state if any
+Metrics -> RepFinalize : final metrics if any
+Rules -> RepFinalize : rep-scoped finalizations if any
+RepFinalize -> PriorityQ : final RepFinalizationBundle if applicable
+Rules -> PriorityQ : finalize remaining set-scoped FormEvent episodes
+Session -> PriorityQ : enqueue SetCloseBarrier\nhighWatermark = last assigned priority commandSequence\nendedAt + status=COMPLETED\ntelemetryExpiresAt = endedAt + 7 days
+PriorityQ -> Writer : drain/commit all commands <= highWatermark, then barrier
+Writer -> Repo : commit close barrier after required commands durable
 Repo -> DB : durable transaction(s)
 Writer --> Session : SetCloseBarrier committed
 Session --> UI : set saved / closed
 UI --> Shawn : saved
 
-note over Pose,TelemetryStage
-Realtime inference rate and persistence sampling rate are independent.
-Pose data is sampled/chunked before Room so storage does not scale as
-one database row per analyzed frame.
+note over Ordered,Lane
+All stateful biomechanics processing is serialized and timestamp ordered.
+Late inference callbacks are discarded rather than mutating old temporal state.
 end note
 
-note over Gate,Rules
-A significant tracking gap is a temporal discontinuity.
-The interrupted rep is not resumed after recovery; analyzer/rule state
-restarts from a fresh stable movement state.
+note over Signal,Reset
+A significant discontinuity resets every stateful temporal consumer:
+filter/velocity history, rep FSM, metric accumulators, trace builder and rule episodes.
+Recovery starts from a fresh stable movement state.
 end note
 
-note over Rules,PriorityQ
-A continuous form problem is one FormEvent episode, not one event/frame.
-The same FormEvent id is activated then finalized/upserted.
-This prevents frame-rate-dependent long-term data growth.
+note over RepFinalize,PriorityQ
+RepFinalizationBundle is the atomic durability unit for a rep.
+A saved rep cannot exist without its final metrics/trace bundle transaction.
 end note
 
-note over Session,Scheduler
-SetCloseBarrier is enqueued only after the analysis pipeline is idle
-and analyzer/rule in-memory state has been finalized.
-No late high-value record may appear behind the close barrier.
-Short-lived telemetry remains best-effort and does not gate set close.
+note over PriorityQ,Writer
+Priority commands carry monotonic commandSequence values.
+FormEvent writes carry eventRevision values.
+SetCloseBarrier is reserved/non-droppable and closes only after all
+priority commands <= highWatermark are durable.
 end note
 
 note over TelemetryQ,PriorityQ
-Storage is outside the coaching critical path.
-Short-lived telemetry may be dropped under pressure.
-PriorityPersistenceQueue is in-memory scheduling, not durable storage;
-records become durable after Room commit.
-end note
-
-note over Writer,Session
-Normal Stop Set has an explicit durability barrier for higher-value data.
-A process crash may still lose uncommitted current data; on next startup,
-stale ACTIVE workout/execution/set/form-event records are recovered
-as INTERRUPTED.
+Short-lived pose/debug telemetry is best-effort and may be dropped under pressure.
+Higher-value records are prioritized; persistence never blocks live coaching.
 end note
 
 @enduml
