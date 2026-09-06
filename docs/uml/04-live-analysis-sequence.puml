@@ -5,6 +5,7 @@ skinparam shadowing false
 autonumber
 actor Shawn
 participant "WorkoutScreen" as UI
+participant "WorkoutSessionController" as Session
 participant "CameraX" as Camera
 participant "LatestFrameScheduler" as Scheduler
 participant "MediaPipe Pose" as Pose
@@ -23,9 +24,10 @@ database "Room / SQLite" as DB
 
 Shawn -> UI : select Incline Dumbbell Press
 Shawn -> UI : Start Set
-UI -> Repo : create ACTIVE ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days
+UI -> Session : startSet()
+Session -> Repo : create ACTIVE ExerciseSet\ntelemetryExpiresAt = startedAt + 7 days
 Repo -> DB : persist set state
-UI -> Camera : start stream
+Session -> Camera : start accepting frames
 
 loop each camera frame
   Camera -> Scheduler : frame + monotonic timestamp
@@ -36,12 +38,12 @@ loop each camera frame
   Signal --> Gate : MovementFrame
   alt tracking invalid
     Gate --> UI : setup / visibility guidance
-    Gate -> TelemetryQ : TrackingEvent on state change
+    Gate -> TelemetryQ : TrackingEvent on meaningful state change
   else valid
     Gate --> Analyzer : valid frame
     Analyzer -> Analyzer : update rep state
     Analyzer -> Metrics : calculate metrics
-    Analyzer -> Rules : evaluate metrics / phase / history
+    Metrics -> Rules : metrics + phase + recent history
     Rules --> Cue : set-scoped FormEvent + FormEvidence[]\noptional repId
     Rules -> PriorityQ : FormEvent + structured evidence
 
@@ -75,18 +77,27 @@ loop async short-lived telemetry persistence
 end
 
 Shawn -> UI : Stop Set
-UI -> Camera : stop stream
-UI -> PriorityQ : enqueue SetCloseBarrier\nendedAt + status=COMPLETED\ntelemetryExpiresAt = endedAt + 7 days
+UI -> Session : stopSet()
+Session -> Camera : stop accepting new frames
+Session -> Scheduler : await in-flight analysis quiescence
+Scheduler --> Session : pipeline idle
+Session -> PriorityQ : enqueue SetCloseBarrier\nendedAt + status=COMPLETED\ntelemetryExpiresAt = endedAt + 7 days
 PriorityQ -> Writer : drain earlier priority records, then barrier
 Writer -> Repo : commit pending priority data + close set
 Repo -> DB : durable transaction(s)
-Writer --> UI : SetCloseBarrier committed
-UI --> Shawn : set saved / closed
+Writer --> Session : SetCloseBarrier committed
+Session --> UI : set saved / closed
+UI --> Shawn : saved
 
 note over Pose,TelemetryQ
 Recent replay starts from perception output before normalization/smoothing.
 No camera image bytes are stored. PoseObservation is best-effort,
 so storage pressure may create gaps; do not promise perfect replay.
+end note
+
+note over Session,Scheduler
+SetCloseBarrier is enqueued only after the analysis pipeline is idle.
+No late analyzer/rule output may appear behind the close barrier.
 end note
 
 note over TelemetryQ,PriorityQ
@@ -96,7 +107,7 @@ PriorityPersistenceQueue is in-memory scheduling, not durable storage;
 records become durable after Room commit.
 end note
 
-note over Writer,UI
+note over Writer,Session
 Normal Stop Set has an explicit durability barrier for higher-value data.
 A process crash may still lose uncommitted current data; on next startup,
 stale ACTIVE workout/execution/set records are recovered as INTERRUPTED.
