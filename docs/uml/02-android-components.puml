@@ -9,18 +9,22 @@ package "gym-buddy Android App" {
   [Camera Controller\n(CameraX)] as Camera
   [Frame Scheduler\nlatest-frame / backpressure] as Scheduler
   [Pose Perception\n(MediaPipe, bundled model)] as Pose
+  [Ordered Result Gate] as Ordered
+  [Serialized Analysis Lane] as AnalysisLane
   [Coordinate Normalizer] as Normalize
-  [Signal Processor\nSmoothing / velocity] as Signal
+  [Signal Processor\nconfidence-aware smoothing / velocity] as Signal
   [Tracking Quality Gate] as Quality
+  [Temporal Reset Coordinator] as Reset
   [Exercise Analyzer\nIncline DB Press first] as Analyzer
   [Biomechanics Metrics] as Metrics
   [Deterministic Rule Engine\n+ Episode Tracker] as Rules
   [Cue Policy + Arbitrator] as CuePolicy
+  [Rep Finalization Assembler] as RepFinalize
   [Live Overlay] as Overlay
   [Telemetry Sampler + Chunker\nbounded persistence rate] as TelemetryStage
   [Short-lived Telemetry Buffer\nbounded / best-effort] as TelemetryBuffer
   [Priority Persistence Queue\nbounded / reserved capacity] as PriorityQueue
-  [Batch Writer\noff realtime path] as BatchWriter
+  [Serialized Batch Writer\ncommandSequence ordered] as BatchWriter
   [Workout Repository] as Repo
   [Health Connect Adapter] as Health
   [Health Aggregator] as HealthAgg
@@ -32,35 +36,49 @@ package "gym-buddy Android App" {
 UI --> Session : start/stop set
 Session --> Repo : create/close workout hierarchy
 Session --> Camera : start / stop accepting frames
-Session --> Scheduler : await analysis quiescence on Stop Set
-Session --> Analyzer : finalize partial/in-progress rep state
-Session --> Rules : finalize active FormEvent episodes
-Session --> PriorityQueue : SetCloseBarrier after finalization
-Camera --> Scheduler : frames + timestamps
+Session --> [Analysis Pipeline] : await full pipeline quiescence on Stop Set
+Session --> Reset : exercise/setup reconfiguration
+Session --> RepFinalize : finalize partial/in-progress rep on Stop Set
+Session --> Rules : finalize active set-scoped episodes
+Session --> PriorityQueue : SetCloseBarrier(highWatermark) after finalization
+
+Camera --> Scheduler : frames + monotonic timestamps
 Scheduler --> Pose : newest eligible frame
-Pose --> TelemetryStage : PoseObservation\n(no image bytes)
+Pose --> Ordered : inference result + source timestamp
+Ordered --> AnalysisLane : only strictly increasing timestamps
+AnalysisLane --> TelemetryStage : ordered PoseObservation\n(no image bytes)
+AnalysisLane --> Normalize : ordered pose output
 TelemetryStage --> TelemetryBuffer : versioned PoseObservationChunk
-Pose --> Normalize : landmarks + confidence
 Normalize --> Signal : canonical coordinates
 Signal --> Quality : smoothed MovementFrame
 Quality --> Analyzer : valid frames only
 Quality --> Overlay : tracking/calibration guidance
-Quality --> TelemetryBuffer : TrackingEvent on state changes
+Quality --> TelemetryBuffer : TrackingEvent on meaningful state changes
+Quality --> Reset : significant tracking discontinuity
+Reset --> Signal : reset filter / velocity history
+Reset --> Analyzer : reset rep temporal state
+Reset --> Metrics : reset ROM / tempo / trajectory accumulators
+Reset --> Rules : interrupt/reset active temporal rule state
+Reset --> RepFinalize : invalidate in-progress trace state
+
 Analyzer --> Metrics : phase + movement features
 Metrics --> Rules : metrics + phase + recent history
 Rules --> CuePolicy : active actionable issue state
 CuePolicy --> Overlay : highest-priority actionable cue
 CuePolicy --> [Android TextToSpeech] : offline voice only; otherwise visual fallback
 
-Analyzer --> PriorityQueue : completed/partial rep summary + CompactRepTrace
-Metrics --> PriorityQueue : final rep metrics
-Rules --> PriorityQueue : FormEvent activation/finalization + FormEvidence[]
+Analyzer --> RepFinalize : rep/partial-rep state on finalization
+Metrics --> RepFinalize : final rep metrics
+Rules --> RepFinalize : rep-scoped FormEvent finalizations
+RepFinalize --> PriorityQueue : atomic RepFinalizationBundle
+Rules --> PriorityQueue : revisioned set-scoped FormEvent activation/update/finalization
 CuePolicy --> PriorityQueue : CueDelivery when actually delivered
+
 TelemetryBuffer --> BatchWriter : best-effort short-lived batches
-PriorityQueue --> BatchWriter : priority batches first / SetCloseBarrier
-BatchWriter --> Repo : persist / upsert transaction
+PriorityQueue --> BatchWriter : ordered priority commands first
+BatchWriter --> Repo : serialized persist / upsert transaction
 Repo --> Room
-BatchWriter --> Session : SetCloseBarrier commit ack
+BatchWriter --> Session : SetCloseBarrier commit ack after <= highWatermark durable
 Session --> UI : set saved only after ack
 
 Health --> HealthAgg : permitted Health Connect records
@@ -73,48 +91,44 @@ UI --> Repo : history / workout state
 note bottom of Pose
 ML ends here. Everything downstream is deterministic code.
 Pose model is bundled; no runtime network download.
-PoseObservation contains pose output + frame transform metadata only,
-never camera image bytes.
 end note
 
-note bottom of TelemetryStage
-Realtime analysis FPS and persistence sampling rate are independent.
-Persist only a bounded sample rate and chunk multiple observations
-into versioned binary payloads to avoid one Room row per frame.
-Exact sampling/chunk/codec policy belongs in SPEC/tests.
+note bottom of Ordered
+MediaPipe/inference callbacks may complete asynchronously.
+Discard late/out-of-order results where timestamp <= lastProcessedTimestamp.
+Only one ordered stream enters stateful analysis.
 end note
 
-note bottom of Session
-At most one ExerciseSet is ACTIVE in the realtime pipeline.
-Stop Set ordering is strict:
-1) stop accepting new camera frames,
-2) await in-flight analysis quiescence,
-3) finalize analyzer/rule in-memory state,
-4) enqueue SetCloseBarrier,
-5) show saved/closed only after Room commit ack.
-Raw short-lived telemetry need not block this barrier.
+note bottom of AnalysisLane
+Normalizer, SignalProcessor, QualityGate, Analyzer, Metrics and Rules
+run as one serialized temporal lane for a set.
+No concurrent mutation of exercise state is allowed.
 end note
 
-note bottom of Rules
-One continuous form problem is one stateful FormEvent episode.
-PENDING stays in memory; ACTIVE/FINALIZED state is persisted using
-the same event id so long-term data does not scale with frame rate.
+note bottom of Signal
+Low-confidence/missing landmarks do not update filter state as if valid.
+Filtering is confidence-aware before whole-frame quality decisions.
 end note
 
-note bottom of TelemetryBuffer
-Short-lived PoseObservationChunk / TrackingEvent data is best-effort.
-Storage pressure may create gaps and must never block coaching.
+note bottom of RepFinalize
+Rep, RepMetric[], CompactRepTrace and rep-scoped finalizations are emitted
+as one RepFinalizationBundle and persisted atomically in one Room transaction.
 end note
 
 note bottom of PriorityQueue
-This is an in-memory PRIORITY queue, not durable storage.
-Durability begins only after Room commit.
-Reserve control capacity for SetCloseBarrier and higher-value records.
+Commands carry monotonic commandSequence values.
+FormEvent upserts carry eventRevision; older revisions cannot overwrite newer ones.
+SetCloseBarrier is reserved/non-droppable and carries a highWatermark.
 end note
 
-note bottom of Recovery
-After process death, stale ACTIVE WorkoutSession /
-ExerciseExecution / ExerciseSet / FormEvent records become INTERRUPTED.
+note bottom of Session
+Normal Stop Set ordering:
+1) stop accepting new camera frames,
+2) await inference + ordered gate + analysis lane quiescence,
+3) finalize temporal state,
+4) enqueue SetCloseBarrier(highWatermark),
+5) show saved only after Room commit ack.
+Short-lived telemetry never gates close.
 end note
 
 @enduml
