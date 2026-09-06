@@ -8,6 +8,7 @@ state ExerciseSelected {
   [*] --> LoadRuntimeConfig
   LoadRuntimeConfig : load ExerciseDefinition
   LoadRuntimeConfig : load optional CalibrationProfile
+  LoadRuntimeConfig : load ExerciseParameterSnapshot defaults
 }
 
 ExerciseSelected --> SetupChecking : open camera / pose available
@@ -17,51 +18,54 @@ SetupChecking --> Ready : setup valid for stability window
 
 Ready --> ActiveSet : user taps Start Set
 ActiveSet --> TrackingDegraded : invalid tracking exceeds tolerated gap
-TrackingDegraded --> ActiveSet : quality valid for recovery window\nrestart from stable movement state
+TrackingDegraded --> ActiveSet : quality valid for recovery window\nrestart from fresh stable movement state
 TrackingDegraded --> RepositionRequired : invalid persists
-RepositionRequired --> ActiveSet : setup recovers and stabilizes\nrestart from stable movement state
+RepositionRequired --> ActiveSet : setup recovers and stabilizes\nrestart from fresh stable movement state
+
+ActiveSet --> RepositionRequired : material camera/view transform change\nor exercise/setup parameter change
 
 ActiveSet --> Finalizing : user taps Stop Set
 TrackingDegraded --> Finalizing : user taps Stop Set
 RepositionRequired --> Finalizing : user taps Stop Set
-Finalizing --> Ready : analyzer/rules finalized\nSetCloseBarrier committed
+Finalizing --> Ready : temporal state finalized\nSetCloseBarrier committed
 
 ExerciseSelected --> [*] : leave workout
 Ready --> [*] : leave workout
 
 note right of SetupChecking
-This is camera/setup calibration, not a claim of exact
-anthropometric limb-length measurement from one phone camera.
-Height may be user-provided for normalized context, but the app
-must not invent exact limb lengths in centimeters.
+This is camera/setup validation, not a claim of exact anthropometric
+limb-length measurement from one monocular phone camera.
+Height may be user-provided for normalized context; exact limb lengths
+must not be invented in centimeters.
 end note
 
 note right of Ready
 Start Set is enabled only after a stable valid setup window.
-Exact stability duration and confidence thresholds belong in SPEC/tests.
+Exact confidence/stability thresholds belong in SPEC/tests.
 end note
 
 note right of TrackingDegraded
 Do not advance rep state, evaluate biomechanics form rules,
 or deliver form cues while tracking quality is invalid.
-When the tolerated tracking-gap window is exceeded:
-- invalidate/reset the current in-progress rep temporal state,
-- finalize/reset active FormEvent episodes with tracking-gap reason,
-- record a short-lived TrackingEvent transition.
-Recovery starts a fresh movement-state acquisition; it does not
-continue the interrupted rep as though the gap never happened.
+When the tolerated gap is exceeded, TemporalResetCoordinator resets:
+- confidence-aware SignalProcessor filter/velocity history,
+- ExerciseAnalyzer rep temporal state,
+- BiomechanicsMetrics ROM/tempo/path accumulators,
+- CompactRepTrace builder state,
+- RuleEpisodeTracker active temporal episodes.
+A short-lived TrackingEvent records the transition.
 end note
 
 note right of RepositionRequired
-A prolonged invalid state should prefer clear reposition guidance
-over repeated form coaching. Recovery is automatic once the setup
-is valid again for the configured recovery window, but rep/rule
-state restarts from a stable baseline.
+A material view/transform/setup change is a temporal discontinuity.
+Recovery never resumes an interrupted rep as if nothing happened;
+it reacquires a fresh stable movement state.
 end note
 
 note right of Finalizing
-Stop Set first quiesces in-flight analysis, then finalizes partial
-rep/rule state, then commits the reserved SetCloseBarrier.
+Stop Set first stops new frames, waits for all inference/ordered/analysis work
+to quiesce, finalizes rep/metric/rule state, then commits the reserved
+SetCloseBarrier(highWatermark). The UI shows saved only after commit ack.
 end note
 
 @enduml
