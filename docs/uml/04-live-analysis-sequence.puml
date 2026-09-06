@@ -15,73 +15,67 @@ participant "InclineDbPressAnalyzer" as Analyzer
 participant "BiomechanicsMetrics" as Metrics
 participant "RuleEngine" as Rules
 participant "CueArbitrator" as Cue
-queue "TelemetryBuffer" as Buffer
+queue "TelemetryRingBuffer" as TelemetryQ
+queue "DurableEventQueue" as DurableQ
 participant "BatchWriter" as Writer
 participant "WorkoutRepository" as Repo
 database "Room / SQLite" as DB
 
 Shawn -> UI : select Incline Dumbbell Press
 Shawn -> UI : Start Set
-UI -> Camera : start analysis stream
+UI -> Camera : start stream
 
 loop each camera frame
-  Camera -> Scheduler : ImageProxy + monotonic timestamp
-  Scheduler -> Pose : newest eligible frame only
-  Pose --> Normalize : landmarks + visibility / presence
-  Normalize --> Signal : canonical coordinates + body side
-  Signal --> Gate : smoothed MovementFrame
-
-  alt tracking/calibration invalid
+  Camera -> Scheduler : frame + monotonic timestamp
+  Scheduler -> Pose : newest eligible frame
+  Pose --> Normalize : landmarks + confidence
+  Normalize --> Signal : canonical coordinates
+  Signal --> Gate : MovementFrame
+  alt tracking invalid
     Gate --> UI : setup / visibility guidance
   else valid
-    Gate --> Analyzer : valid MovementFrame
-    Analyzer -> Analyzer : update exercise-specific rep state
-    Analyzer -> Metrics : calculate(frame, phase)
-    Metrics --> Analyzer : ROM / angles / path / symmetry / tempo
-    Analyzer -> Rules : evaluate(metrics, phase, recent history)
+    Gate --> Analyzer : valid frame
+    Analyzer -> Analyzer : update rep state
+    Analyzer -> Metrics : calculate metrics
+    Analyzer -> Rules : evaluate metrics / phase / history
     Rules --> Cue : candidate FormEvents
-    Cue --> UI : max one prioritized actionable cue
-
-    Analyzer -> Buffer : offer telemetry + rep transitions
-    Metrics -> Buffer : offer metrics + compact trace points
-    Rules -> Buffer : offer evidence + FormEvents
-
+    Cue --> UI : one prioritized cue
+    Analyzer -> TelemetryQ : raw telemetry
+    Rules -> DurableQ : FormEvents + evidence
     alt rep completed
       Analyzer --> UI : increment rep count
-      Analyzer -> Buffer : durable rep summary / trace finalization
+      Analyzer -> DurableQ : rep summary + CompactRepTrace
+      Metrics -> DurableQ : final rep metrics
     end
   end
 end
 
-par asynchronous persistence outside realtime path
-  loop while buffered items exist
-    Buffer -> Writer : drain bounded batch
-    Writer -> Repo : persist batch
-    Repo -> DB : transaction
-  end
+loop async durable persistence
+  DurableQ -> Writer : next durable batch
+  Writer -> Repo : persist
+  Repo -> DB : transaction
+end
+loop async telemetry persistence
+  TelemetryQ -> Writer : next telemetry batch
+  Writer -> Repo : persist short-lived telemetry
+  Repo -> DB : transaction
 end
 
 Shawn -> UI : Stop Set
 UI -> Camera : stop stream
-UI -> Buffer : finalize current set
-Buffer -> Writer : flush durable summary items
-Writer -> Repo : close exercise set / execution state
-Repo -> DB : commit
+UI -> DurableQ : finalize set summary
 
-note over Scheduler,Pose
-Stale camera frames are dropped rather than queued.
+note over TelemetryQ,DurableQ
+Storage is outside the coaching critical path.
+Telemetry uses a bounded best-effort queue.
+Durable rep summaries, metrics and FormEvents use
+a separate priority queue and are persisted first.
 end note
 
 note over Gate,Cue
-A single noisy frame must never trigger coaching.
-Quality gate + confidence + persistence + severity + cooldown apply.
-end note
-
-note over Buffer,Writer
-Persistence is not part of the coaching critical path.
-The buffer is bounded and non-blocking.
-If overloaded, drop raw high-frequency telemetry first;
-never delay live coaching or durable rep/event summaries.
+Quality/confidence/persistence/cooldown protect against noisy cues.
+TTS uses an offline-capable installed voice only;
+otherwise feedback remains visual.
 end note
 
 @enduml
