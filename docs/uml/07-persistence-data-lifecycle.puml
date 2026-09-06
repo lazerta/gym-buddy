@@ -7,10 +7,9 @@ rectangle "PoseObservation\nMediaPipe output only; no image bytes" as PoseObs
 rectangle "Telemetry Sampler + Chunker" as TelemetryStage
 rectangle "PoseObservationChunk\nversioned binary payload" as PoseChunk
 rectangle "Tracking / Calibration Debug Events" as Tracking
-rectangle "Rep Metrics" as Metrics
-rectangle "Set-scoped FormEvent + FormEvidence[]\noptional repId" as Events
+rectangle "RepFinalizationBundle\nRep + Metrics + Compact Trace\n+ rep-scoped finalizations" as RepBundle
+rectangle "Set-scoped FormEvent + FormEvidence[]" as Events
 rectangle "CueDelivery\nactual feedback only" as CueDelivery
-rectangle "CompactRepTrace\n+ generic TraceChannel[]" as CompactTrace
 rectangle "Daily Nutrition Context" as Nutrition
 rectangle "DailyHealthSummary" as DailyHealth
 rectangle "WeeklyBodyComposition" as Weekly
@@ -18,8 +17,8 @@ rectangle "Health Connect Fine-grained Records\nprocessing input only" as Health
 rectangle "Health Aggregator\nin-memory" as HealthAgg
 rectangle "Debug Video\nopt-in only" as Video
 queue "Short-lived Telemetry Buffer\nbest-effort" as TelemetryQ
-queue "Priority Persistence Queue" as PriorityQ
-rectangle "Batch Writer" as Writer
+queue "Priority Persistence Queue\ncommandSequence ordered" as PriorityQ
+rectangle "Serialized Batch Writer" as Writer
 rectangle "Retention Worker\nstartup + periodic" as Retention
 rectangle "Startup Recovery" as Recovery
 database "Room / SQLite" as Room
@@ -28,17 +27,16 @@ rectangle "App-private no-backup storage" as Files
 Frame --> PoseObs : pose inference output
 Frame --> Video : explicit debug mode only
 Frame --> Frame : discard immediately
-PoseObs --> TelemetryStage : candidate observation
+PoseObs --> TelemetryStage : ordered candidate observation
 TelemetryStage --> PoseChunk : bounded-rate sample + chunk encode
 PoseChunk --> TelemetryQ : short-lived chunk
 Tracking --> TelemetryQ : short-lived debug events
-Metrics --> PriorityQ : long-term derived metrics
-Events --> PriorityQ : structured detected issue episodes
+RepBundle --> PriorityQ : atomic rep durability command
+Events --> PriorityQ : revisioned set-scoped issue updates
 CueDelivery --> PriorityQ : actual feedback record
-CompactTrace --> PriorityQ : long-term generic compact trace
-PriorityQ --> Writer : priority batches
+PriorityQ --> Writer : ordered priority commands first
 TelemetryQ --> Writer : best-effort short-lived batches
-Writer --> Room
+Writer --> Room : serialized transactions
 
 Nutrition --> Room : long-term compact daily context
 Health --> HealthAgg : normalize / aggregate
@@ -52,12 +50,6 @@ Retention --> Room : prune expired set-scoped chunks/events
 Retention --> Files : delete expired debug media
 Recovery --> Room : stale ACTIVE hierarchy/events -> INTERRUPTED
 
-note right of TelemetryStage
-Realtime inference rate and persisted telemetry rate are independent.
-Chunk multiple timestamped observations into a versioned binary payload.
-Exact sample rate, chunk size and codec belong in SPEC/tests.
-end note
-
 note right of PoseChunk
 Do not store one Room row per analyzed frame.
 Chunks are short-lived, set-scoped and logically expire at
@@ -69,22 +61,27 @@ Emit meaningful state transitions rather than every bad frame.
 Tracking/calibration debug events share the set's short-lived expiry.
 end note
 
-note right of Events
-One continuous detected problem is one FormEvent episode.
-Activation/finalization update the same id; CueDelivery is separate.
+note right of RepBundle
+RepFinalizationBundle is written in one Room transaction.
+A durable rep therefore carries its final metrics and compact trace state
+without cross-command partial saves.
 end note
 
-note right of CompactTrace
-Keep a small generic standardized trace long-term.
-Use schemaId + typed channels for exercise-specific signals.
-This supports longitudinal reinterpretation, not full raw replay.
+note right of Events
+One continuous set-scoped problem is one FormEvent episode.
+Updates use the same id with increasing eventRevision.
+Stale revisions may not overwrite newer state.
+end note
+
+note right of CueDelivery
+CueDelivery records only feedback actually shown/spoken.
+Suppressed FormEvents have no delivery child.
 end note
 
 note bottom of PriorityQ
-This queue prioritizes persistence but is not itself durable.
-Durability begins at successful Room commit.
-Normal Stop Set uses a reserved SetCloseBarrier after all earlier
-high-value records and in-memory analyzer/rule finalization.
+Every priority command has a monotonic commandSequence.
+Normal Stop Set enqueues a reserved SetCloseBarrier(highWatermark).
+The set is COMPLETED only after all commands <= highWatermark are durable.
 end note
 
 note bottom of Retention
@@ -95,7 +92,7 @@ end note
 
 note bottom of Recovery
 If the process dies with ACTIVE workout/execution/set/FormEvent records,
-startup recovery marks them INTERRUPTED instead of leaving open history.
+startup recovery marks them INTERRUPTED rather than leaving open history.
 end note
 
 note bottom of Room
