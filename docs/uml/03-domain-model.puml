@@ -138,7 +138,7 @@ class Rep {
   completionState: String
 }
 
-class PoseObservation {
+class PoseObservation <<value object>> {
   observationSchemaVersion: Int
   elapsedRealtimeNanos: Long
   imageLandmarks: PoseLandmark[]
@@ -147,6 +147,16 @@ class PoseObservation {
   mirrored: Boolean
   frameWidth: Int
   frameHeight: Int
+}
+
+class PoseObservationChunk {
+  id: UUID
+  observationSchemaVersion: Int
+  codecVersion: Int
+  startElapsedNanos: Long
+  endElapsedNanos: Long
+  sampleCount: Int
+  payload: ByteArray
 }
 
 class TrackingEvent {
@@ -224,7 +234,8 @@ WorkoutSession "1" *-- "0..*" ExerciseExecution
 ExerciseExecution "0..*" --> "1" ExerciseDefinition : executes >
 ExerciseExecution "0..*" --> "0..1" CalibrationProfile : used calibration >
 ExerciseExecution "1" *-- "0..*" ExerciseSet
-ExerciseSet "1" *-- "0..*" PoseObservation
+ExerciseSet "1" *-- "0..*" PoseObservationChunk
+PoseObservationChunk ..> PoseObservation : decodes to >
 ExerciseSet "1" *-- "0..*" TrackingEvent
 ExerciseSet "1" *-- "0..*" Rep
 ExerciseSet "1" *-- "0..*" FormEvent
@@ -270,11 +281,12 @@ Normal close transitions ACTIVE -> COMPLETED.
 Startup recovery transitions stale ACTIVE records -> INTERRUPTED.
 end note
 
-note right of PoseObservation
-Short-lived perception output only; never image/video bytes.
-Captured immediately after MediaPipe and before normalization/smoothing
-so recent replay can re-run downstream deterministic processing.
-Storage is best-effort and may contain gaps under pressure.
+note right of PoseObservationChunk
+Do not persist one Room row per analyzed frame.
+Sample short-lived PoseObservation values at a bounded persistence rate,
+encode multiple timestamped observations into versioned binary chunks,
+and retain chunks only until the owning set's telemetryExpiresAt.
+Exact sample rate/chunk size/codec belong in the implementation spec.
 end note
 
 note right of DailyHealthSummary
