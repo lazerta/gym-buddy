@@ -22,7 +22,7 @@ android {
     }
 
     sourceSets.named("main") {
-        kotlin.directories += file("../contracts/frame-source/src/main/kotlin")
+        kotlin.directories.add("../contracts/frame-source/src/main/kotlin")
     }
 }
 
@@ -30,7 +30,7 @@ val poseModelFile = layout.projectDirectory.file(
     "src/main/assets/pose_landmarker_lite.task"
 ).asFile
 
-val fetchPoseModel by tasks.registering {
+val fetchPoseModel = tasks.register("fetchPoseModel") {
     outputs.file(poseModelFile)
 
     doLast {
