@@ -1,0 +1,208 @@
+name: simulator-e2e
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  simulator-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout simulator harness
+        uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          path: harness-src
+
+      - name: Install harness server
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./harness-src
+
+      - name: Prepare deterministic frame session
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl
+          mkdir -p e2e-session/frames e2e-session/ground_truth
+
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i color=c=black:s=640x480:r=30:d=0.2 \
+            -frames:v 1 e2e-session/frames/000000.jpg
+
+          cp e2e-session/frames/000000.jpg e2e-session/frames/000001.jpg
+          cp e2e-session/frames/000000.jpg e2e-session/frames/000002.jpg
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("e2e-session")
+          timestamps = [0, 33333, 66667]
+          frames = []
+
+          for i, ts in enumerate(timestamps):
+              gt = {
+                  "schema_version": 1,
+                  "session_id": "android-e2e",
+                  "exercise_id": "smith_squat",
+                  "frame_id": i,
+                  "timestamp_us": ts,
+                  "expected_transport": True,
+              }
+              gt_path = root / "ground_truth" / f"{i:06d}.json"
+              gt_path.write_text(json.dumps(gt) + "\n", encoding="utf-8")
+
+              frames.append({
+                  "frame_id": i,
+                  "timestamp_us": ts,
+                  "width": 640,
+                  "height": 480,
+                  "mime_type": "image/jpeg",
+                  "image_path": f"frames/{i:06d}.jpg",
+                  "ground_truth_path": f"ground_truth/{i:06d}.json",
+              })
+
+          manifest = {
+              "schema_version": 1,
+              "session_id": "android-e2e",
+              "exercise_id": "smith_squat",
+              "fps": 30.0,
+              "width": 640,
+              "height": 480,
+              "source": "github-actions-fixture",
+              "frames": frames,
+          }
+          (root / "manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Start harness frame server
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python -m harness.frame_server \
+            --session e2e-session \
+            --host 0.0.0.0 \
+            --port 8788 \
+            > frame-server.log 2>&1 &
+          echo $! > frame-server.pid
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8788/v1/session >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat frame-server.log
+          exit 1
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools" \
+            "emulator" \
+            "system-images;android-35;google_apis;x86_64"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Run emulator E2E
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            set -euo pipefail
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+            adb shell am start -W \
+              -n com.gymbuddy.app/.MainActivity \
+              --es simulatorBaseUrl http://10.0.2.2:8788 \
+              --ez autoStartSimulator true
+
+            success=0
+            for i in $(seq 1 60); do
+              count=$(curl -fsS http://127.0.0.1:8788/v1/results | python -c 'import json,sys; print(len(json.load(sys.stdin)))' || echo 0)
+              if [ "$count" -ge 3 ]; then
+                success=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$success" -ne 1 ]; then
+              echo "E2E timed out waiting for 3 results"
+              adb logcat -d | tail -n 400
+              curl -fsS http://127.0.0.1:8788/v1/results || true
+              exit 1
+            fi
+
+            curl -fsS http://127.0.0.1:8788/v1/results | tee e2e-results.json
+
+      - name: Verify posted MediaPipe results
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          results = json.loads(Path("e2e-results.json").read_text())
+          assert len(results) == 3, results
+
+          expected_ts = [0, 33333, 66667]
+          for i, item in enumerate(results):
+              assert item["session_id"] == "android-e2e"
+              assert item["frame_id"] == i
+              assert item["timestamp_us"] == expected_ts[i]
+              analysis = item["analysis"]
+              assert "mediapipe_timestamp_ms" in analysis
+              assert "pose_count" in analysis
+              assert "landmarks" in analysis
+              assert "world_landmarks" in analysis
+
+          print("ANDROID_SIMULATOR_MEDIAPIPE_E2E_PASS")
+          PY
+
+      - name: Upload E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-e2e-diagnostics
+          path: |
+            e2e-results.json
+            frame-server.log
+          if-no-files-found: ignore
