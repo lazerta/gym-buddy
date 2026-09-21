@@ -20,7 +20,7 @@ First supported movement: **Incline Dumbbell Press**.
 Pipeline:
 
 ```text
-CameraX
+FrameSource<MPImage>
   -> MediaPipe Pose Landmarker
   -> landmark smoothing
   -> rep phase state machine
@@ -57,3 +57,21 @@ Health data is not part of the real-time camera critical path.
 ## Project workspace
 
 Source code lives in this repository. Specs, training samples, build artifacts, and reports are kept separately in the project's Google Drive workspace.
+
+
+## Testable camera boundary
+
+CameraX must not be the direct dependency of the biomechanics pipeline. The app
+depends on a `FrameSource<MPImage>` boundary instead.
+
+```text
+CameraXFrameSource ─┐
+                    ├─> MediaPipe -> smoothing -> reps -> form rules
+SimulatorFrameSource┘
+```
+
+The protocol contract lives in `contracts/frame-source/`. The matching frame
+server/exporter is implemented in the simulator harness repository.
+
+This lets the same MediaPipe and deterministic Kotlin analysis code run against
+either the phone camera or MuJoCo-generated RGB frames.
