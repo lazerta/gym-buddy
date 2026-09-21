@@ -6,7 +6,6 @@ data class SimulatorFrameDescriptor(
     val width: Int,
     val height: Int,
     val mimeType: String,
-    val framePath: String,
 )
 
 data class SimulatorSession(
