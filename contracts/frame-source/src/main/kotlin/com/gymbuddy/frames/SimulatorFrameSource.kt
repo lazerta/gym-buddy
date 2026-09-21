@@ -23,7 +23,7 @@ data class SimulatorResultEnvelope(
     val sessionId: String,
     val frameId: Long,
     val timestampUs: Long,
-    val analysisJson: String,
+    val analysis: Map<String, Any?>,
 )
 
 interface SimulatorTransport {
@@ -121,7 +121,7 @@ class SimulatorFrameSource<T>(
 class SimulatorResultSink<R>(
     private val sessionId: String,
     private val transport: SimulatorTransport,
-    private val encoder: (R) -> String,
+    private val encoder: (R) -> Map<String, Any?>,
 ) : FrameResultSink<R> {
 
     override fun submit(frame: FramePacket<*>, result: R) {
@@ -134,7 +134,7 @@ class SimulatorResultSink<R>(
                 sessionId = sessionId,
                 frameId = frame.frameId,
                 timestampUs = frame.timestampUs,
-                analysisJson = encoder(result),
+                analysis = encoder(result),
             )
         )
     }
