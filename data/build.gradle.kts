@@ -11,7 +11,7 @@ android {
 }
 dependencies {
     implementation(project(":domain"))
-    implementation("androidx.room:room-runtime:2.8.5")
+    api("androidx.room:room-runtime:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.7.0")
