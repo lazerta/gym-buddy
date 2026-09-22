@@ -1,0 +1,48 @@
+name: apply-reviewed-production-snapshot
+
+on:
+  push:
+    branches:
+      - full-production-engine-reviewed-final
+    paths:
+      - ".snapshot-final/**"
+      - ".github/workflows/apply-reviewed-production-snapshot.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: full-production-engine-reviewed-final
+          fetch-depth: 0
+
+      - name: Reconstruct reviewed overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .snapshot-final/part-*.txt > /tmp/overlay.b64
+          base64 --decode /tmp/overlay.b64 > /tmp/overlay.tgz
+          echo "5ad9fff781397a6a955dafed0babaea0e6e865b18acf1bce663fc3f44d2cb4ab  /tmp/overlay.tgz" | sha256sum -c -
+
+      - name: Apply production snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf /tmp/overlay.tgz -C .
+          rm -rf .snapshot-final
+          rm -f .github/workflows/apply-reviewed-production-snapshot.yml
+
+      - name: Commit reviewed production snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Apply reviewed full production engine snapshot"
+          git push origin HEAD:full-production-engine-reviewed-final
