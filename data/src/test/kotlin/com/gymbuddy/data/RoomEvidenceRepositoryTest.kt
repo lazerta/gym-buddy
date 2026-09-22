@@ -36,21 +36,23 @@ class RoomEvidenceRepositoryTest {
         val name="gym-test-${UUID.randomUUID()}.db"
         context.deleteDatabase(name)
         val ids:Ids
-        Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build().use { db ->
-            val repo=RoomEvidenceRepository(db.evidenceDao());ids=openSet(repo)
+        val firstDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build()
+        try {
+            val repo=RoomEvidenceRepository(firstDb.evidenceDao());ids=openSet(repo)
             val rep2=rep(2,"rep-2",2_000_000,ids.config.provenance)
             val rep1=rep(1,"rep-1",1_000_000,ids.config.provenance)
             repo.persistCompletedRepBundle(ids.setId,rep2,listOf(obs(rep2,"obs-2")),emptyList(),emptyList())
             val cue=CueEvent("cue-1","bilateral_asymmetry",rep1.repId,rep1.completedAtUs,"MINOR")
             repo.persistCompletedRepBundle(ids.setId,rep1,listOf(obs(rep1,"obs-1")),listOf(CueEvidenceLink(cue,"obs-1")),emptyList())
             repo.persistCueDelivery(CueDeliveryRecord(cue.cueId,CueDeliveryState.COMPLETED))
-        }
-        Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build().use { db ->
-            val loaded=RoomEvidenceRepository(db.evidenceDao()).loadSet(ids.setId)!!
+        } finally { firstDb.close() }
+        val secondDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build()
+        try {
+            val loaded=RoomEvidenceRepository(secondDb.evidenceDao()).loadSet(ids.setId)!!
             assertEquals(listOf(1,2),loaded.reps.map{it.ordinal})
             assertEquals(listOf("rep-1","rep-2"),loaded.observations.map{it.repId})
             assertEquals(listOf(CueDeliveryRecord("cue-1",CueDeliveryState.COMPLETED)),loaded.cueDeliveries)
-        }
+        } finally { secondDb.close() }
         context.deleteDatabase(name)
     }
 
@@ -73,10 +75,11 @@ class RoomEvidenceRepositoryTest {
         val name="gym-migration-${UUID.randomUUID()}.db"
         context.deleteDatabase(name)
         createV1Database(name).close()
-        Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build().use { db ->
-            val cursor=db.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='cue_deliveries'")
+        val migratedDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build()
+        try {
+            val cursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='cue_deliveries'")
             cursor.use { assertTrue(it.moveToFirst()) }
-        }
+        } finally { migratedDb.close() }
         context.deleteDatabase(name)
     }
 
