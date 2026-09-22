@@ -56,6 +56,8 @@ tasks.named("preBuild") {
 }
 
 dependencies {
+    implementation(project(":domain"))
+
     implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.core:core-ktx:1.18.0")
 
