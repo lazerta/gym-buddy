@@ -23,6 +23,8 @@ enum class TrackingQualityReason {
     WRONG_VIEW,
     CAMERA_DISTURBANCE,
     CONTINUITY_GAP,
+    NON_MONOTONIC_TIMESTAMP,
+    LANDMARK_OUT_OF_FRAME,
     INSUFFICIENT_EVIDENCE,
 }
 
@@ -56,6 +58,7 @@ class TrackingQualityGate(
     private val degradedMargin: Double = 0.15,
 ) {
     private var lastAcceptedTimestampUs: Long? = null
+    private var lastFrameTimestampUs: Long? = null
 
     init {
         require(cameraDisturbanceThreshold in 0.0..1.0)
@@ -64,6 +67,7 @@ class TrackingQualityGate(
 
     fun reset() {
         lastAcceptedTimestampUs = null
+        lastFrameTimestampUs = null
     }
 
     fun evaluate(
@@ -72,6 +76,18 @@ class TrackingQualityGate(
         cameraProfile: CameraProfile,
         context: TrackingObservationContext = TrackingObservationContext(),
     ): TrackingQualityResult {
+        val previousFrameTimestamp = lastFrameTimestampUs
+        if (previousFrameTimestamp != null && frame.timestampUs <= previousFrameTimestamp) {
+            return TrackingQualityResult(
+                TrackingQualityState.PAUSED,
+                TrackingQualityReason.NON_MONOTONIC_TIMESTAMP,
+                lock.targetCandidateIndex,
+                null,
+                null,
+            )
+        }
+        lastFrameTimestampUs = frame.timestampUs
+
         if (lock.state != PrimarySubjectLockState.LOCKED) {
             lastAcceptedTimestampUs = null
             return TrackingQualityResult(
@@ -142,6 +158,21 @@ class TrackingQualityGate(
                 TrackingQualityReason.REQUIRED_LANDMARKS_MISSING,
                 targetIndex,
                 requiredVisibleFraction = presentCount.toDouble() / required.size,
+                frameFill = fill,
+            )
+        }
+
+        val outOfFrame = required.any { req ->
+            val observation = target.normalized(req.toLandmarkId()) ?: return@any false
+            observation.position.x !in 0.0..1.0 || observation.position.y !in 0.0..1.0
+        }
+        if (outOfFrame) {
+            lastAcceptedTimestampUs = null
+            return TrackingQualityResult(
+                TrackingQualityState.PAUSED,
+                TrackingQualityReason.LANDMARK_OUT_OF_FRAME,
+                targetIndex,
+                requiredVisibleFraction = null,
                 frameFill = fill,
             )
         }

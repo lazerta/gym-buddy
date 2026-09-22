@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "GymBuddy"
 include(":app")
 include(":domain")
+include(":data")

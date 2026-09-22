@@ -200,7 +200,14 @@ data class MovementPrimitiveSequence(
     }
 }
 
-data class MetricDefinition(val metricId: String, val sourceSignalIds: Set<String>, val unit: SignalUnit) {
+enum class MetricAggregation { MEAN, MIN, MAX, RANGE, ABS_DIFFERENCE, LAST }
+
+data class MetricDefinition(
+    val metricId: String,
+    val sourceSignalIds: Set<String>,
+    val unit: SignalUnit,
+    val aggregation: MetricAggregation = MetricAggregation.MEAN,
+) {
     init {
         requireIdentifier(metricId, "metricId")
         require(sourceSignalIds.isNotEmpty()) { "sourceSignalIds must not be empty" }
@@ -223,13 +230,24 @@ data class MetricProfile(
 }
 
 enum class FormRuleSeverity { INFO, MINOR, MAJOR }
-data class FormRule(val ruleId: String, val ruleVersion: Int, val evidenceSignalIds: Set<String>, val minConfidence: Double, val severity: FormRuleSeverity) {
+enum class FormComparison { MAX_VALUE, MIN_VALUE, MAX_ABS_DIFFERENCE, RANGE_AT_MOST }
+
+data class FormRule(
+    val ruleId: String,
+    val ruleVersion: Int,
+    val evidenceSignalIds: Set<String>,
+    val minConfidence: Double,
+    val severity: FormRuleSeverity,
+    val comparison: FormComparison = FormComparison.MAX_VALUE,
+    val threshold: Double? = null,
+) {
     init {
         requireIdentifier(ruleId, "ruleId")
         requireVersion(ruleVersion, "ruleVersion")
         require(evidenceSignalIds.isNotEmpty()) { "evidenceSignalIds must not be empty" }
         require(evidenceSignalIds.none { it.isBlank() }) { "evidenceSignalIds must not contain blank values" }
         requireUnitInterval(minConfidence, "minConfidence")
+        threshold?.let { require(it.isFinite()) { "threshold must be finite when present" } }
     }
 }
 

@@ -5,6 +5,12 @@ data class AnalysisProvenance(
     val exerciseDefinitionVersion: Int,
     val exerciseDefinitionSemanticHash: String,
     val exerciseProfile: ProfileVersionRef,
+    val cameraProfile: ProfileVersionRef,
+    val signalProfile: ProfileVersionRef,
+    val movementPrimitiveSequence: ProfileVersionRef,
+    val metricProfile: ProfileVersionRef,
+    val formRuleSet: ProfileVersionRef,
+    val cuePolicy: ProfileVersionRef,
     val equipmentProfile: ProfileVersionRef?,
     val personalCalibrationProfile: PersonalCalibrationVersionRef?,
 )
@@ -53,6 +59,12 @@ object AnalysisConfigResolver {
                 exerciseDefinitionVersion = exerciseDefinition.definitionVersion,
                 exerciseDefinitionSemanticHash = exerciseDefinition.semanticHash,
                 exerciseProfile = ProfileVersionRef.from(exerciseProfile),
+                cameraProfile = ProfileVersionRef.from(exerciseProfile.cameraProfile),
+                signalProfile = ProfileVersionRef.from(exerciseProfile.signalProfile),
+                movementPrimitiveSequence = ProfileVersionRef.from(exerciseProfile.movementPrimitiveSequence),
+                metricProfile = ProfileVersionRef.from(exerciseProfile.metricProfile),
+                formRuleSet = ProfileVersionRef.from(exerciseProfile.formRuleSet),
+                cuePolicy = ProfileVersionRef.from(exerciseProfile.cuePolicy),
                 equipmentProfile = equipmentProfile?.let(ProfileVersionRef::from),
                 personalCalibrationProfile = personalCalibrationProfile?.let(
                     PersonalCalibrationVersionRef::from
