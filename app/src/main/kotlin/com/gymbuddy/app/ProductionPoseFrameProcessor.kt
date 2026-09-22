@@ -31,13 +31,26 @@ class ProductionPoseFrameProcessor(
         val result=pipeline.process(frame,context)
         when(result.tracking.state){TrackingQualityState.OBSERVABLE->observable++;TrackingQualityState.DEGRADED->degraded++;TrackingQualityState.PAUSED->paused++;TrackingQualityState.UNKNOWN->unknown++}
         result.movement.repEvidence.forEach{rep->
-            reps++;when(rep.classification){com.gymbuddy.domain.movement.RepClassification.ASSISTED->assisted++;com.gymbuddy.domain.movement.RepClassification.UNCERTAIN->uncertain++;else->Unit}
+            reps++
+            when(rep.classification){com.gymbuddy.domain.movement.RepClassification.ASSISTED->assisted++;com.gymbuddy.domain.movement.RepClassification.UNCERTAIN->uncertain++;else->Unit}
             val setId=set?.setId
-            if(repository!=null&&setId!=null){repository.persistRep(setId,rep);val forms=result.movement.formObservations.filter{it.repId==rep.repId};forms.forEach{repository.persistFormObservation(setId,it)};result.movement.cueEvents.filter{it.repId==rep.repId}.forEach{cue->val obs=forms.firstOrNull{it.ruleId==cue.ruleId};repository.persistCueEvent(setId,cue,obs?.observationId)};result.movement.cueResponses.filter{it.repId==rep.repId}.forEach{repository.persistCueResponse(setId,it)};persistTracking()}
+            if(repository!=null&&setId!=null){
+                val forms=result.movement.formObservations.filter{it.repId==rep.repId}
+                val cueLinks=result.movement.cueEvents.filter{it.repId==rep.repId}.map{cue->CueEvidenceLink(cue,forms.firstOrNull{it.ruleId==cue.ruleId}?.observationId)}
+                val responses=result.movement.cueResponses.filter{it.repId==rep.repId}
+                repository.persistCompletedRepBundle(setId,rep,forms,cueLinks,responses)
+                persistTracking()
+            }
         }
         result.movement.cueEvents.forEach(feedback::onCue)
         return ProductionFrameResult(frame,result,reps)
     }
-    fun finishSet(endedAtUs:Long){val r=repository;val s=set;if(r!=null&&s!=null){persistTracking();r.finishSet(SetSummary(s.setId,endedAtUs,reps,assisted,uncertain))};feedback.clear()}
+    fun finishSet(endedAtUs:Long){
+        pipeline.manualEnd()
+        val r=repository;val s=set
+        if(r!=null&&s!=null){persistTracking();r.finishSet(SetSummary(s.setId,endedAtUs,reps,assisted,uncertain))}
+        pipeline.finalized()
+        feedback.clear()
+    }
     private fun persistTracking(){val r=repository;val s=set;if(r!=null&&s!=null)r.upsertTrackingSummary(TrackingQualitySummary(s.setId,observable,degraded,paused,unknown))}
 }

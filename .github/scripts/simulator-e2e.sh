@@ -4,9 +4,8 @@ set -euo pipefail
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 adb shell am start -W \
-  -n com.gymbuddy.app/.MainActivity \
-  --es simulatorBaseUrl http://10.0.2.2:8788 \
-  --ez autoStartSimulator true
+  -n com.gymbuddy.app/.SimulatorE2EActivity \
+  --es simulatorBaseUrl http://10.0.2.2:8788
 
 success=0
 for i in $(seq 1 60); do

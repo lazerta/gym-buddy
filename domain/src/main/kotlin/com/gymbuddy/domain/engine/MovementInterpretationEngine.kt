@@ -21,13 +21,22 @@ class MovementInterpretationEngine(
     private val config: AnalysisConfig,
     private val signalExtractor: MovementSignalExtractor = MovementSignalExtractor(),
     private val primitiveInterpreter: MovementPrimitiveInterpreter = MovementPrimitiveInterpreter(),
-    private val repDetector: TemporalRepDetector = TemporalRepDetector(),
+    private val repDetector: TemporalRepDetector = TemporalRepDetector(stepConfigs = RepDetectorConfig.fromSequence(config.exerciseProfile.movementPrimitiveSequence)),
     private val evidenceBuilder: RepEvidenceBuilder = RepEvidenceBuilder(),
     private val formEngine: FormAnalysisEngine = FormAnalysisEngine(),
-    private val cueEngine: CueEngine = CueEngine(config.exerciseProfile.cuePolicy),
+    private val cueEngine: CueEngine = CueEngine(config.exerciseProfile.cuePolicy, config.exerciseProfile.formRuleSet),
 ) {
     private val signalHistory = ArrayDeque<MovementSignalFrame>()
     private var lastTimestampUs: Long? = null
+
+    fun reset() {
+        lastTimestampUs = null
+        signalHistory.clear()
+        signalExtractor.reset()
+        primitiveInterpreter.reset()
+        repDetector.reset()
+        cueEngine.reset()
+    }
 
     fun process(timestampUs: Long, pose: NormalizedPose): MovementEngineOutput {
         val last = lastTimestampUs
@@ -42,13 +51,19 @@ class MovementInterpretationEngine(
         val forms = mutableListOf<FormObservation>()
         val cues = mutableListOf<CueEvent>()
         val responses = mutableListOf<CueResponse>()
-        repEvents.filter { it.kind == RepCompletionKind.COMPLETED }.forEach { event ->
-            val rep = evidenceBuilder.build(event, signalHistory.toList(), config)
+        val snapshot = signalHistory.toList()
+        val completed = repEvents.filter { it.kind == RepCompletionKind.COMPLETED }
+        completed.forEach { event ->
+            val rep = evidenceBuilder.build(event, snapshot, config)
             val obs = formEngine.analyze(rep, config.exerciseProfile.formRuleSet)
             val cueDecision = cueEngine.evaluate(rep, obs)
-            evidence += rep; forms += obs; cues += cueDecision.cues; responses += cueDecision.responses
-            while (signalHistory.isNotEmpty() && signalHistory.first().timestampUs <= event.completedAtUs) signalHistory.removeFirst()
+            evidence += rep
+            forms += obs
+            cues += cueDecision.cues
+            responses += cueDecision.responses
         }
+        val through = completed.maxOfOrNull { it.completedAtUs }
+        if (through != null) while (signalHistory.isNotEmpty() && signalHistory.first().timestampUs <= through) signalHistory.removeFirst()
         return MovementEngineOutput(timestampUs, signals, primitives, repEvents, evidence, forms, cues, responses, paused = false)
     }
 
@@ -57,7 +72,10 @@ class MovementInterpretationEngine(
         if (last != null && timestampUs <= last) return pausedOutput(timestampUs)
         lastTimestampUs = timestampUs
         val invalid = repDetector.onInterruption(timestampUs)
-        signalExtractor.reset(); primitiveInterpreter.reset(); signalHistory.clear(); cueEngine.onInterruption()
+        signalExtractor.reset()
+        primitiveInterpreter.reset()
+        signalHistory.clear()
+        cueEngine.onInterruption()
         return MovementEngineOutput(timestampUs, null, null, invalid, emptyList(), emptyList(), emptyList(), emptyList(), paused = true)
     }
 

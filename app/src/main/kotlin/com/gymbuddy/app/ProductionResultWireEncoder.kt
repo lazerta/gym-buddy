@@ -7,6 +7,8 @@ object ProductionResultWireEncoder {
     fun encode(result:ProductionFrameResult):Map<String,Any?> = poseWire(result.poseFrame)+mapOf(
         "tracking_state" to result.pipeline.tracking.state.name,
         "tracking_reason" to result.pipeline.tracking.reason.name,
+        "camera_guidance" to result.pipeline.cameraGuidance.name,
+        "set_lifecycle_state" to result.pipeline.lifecycleState.name,
         "primary_subject_candidate_index" to result.pipeline.lock.targetCandidateIndex,
         "rep_count" to result.repCount,
         "rep_events" to result.pipeline.movement.repEvents.map{mapOf("ordinal" to it.ordinal,"kind" to it.kind.name,"classification" to it.classification?.name,"completed_at_us" to it.completedAtUs)},
