@@ -145,8 +145,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
-            bash -lc '
-            set -euo pipefail
+            set -eu
             adb install -r app/build/outputs/apk/debug/app-debug.apk
 
             adb shell am start -W \
@@ -155,12 +154,14 @@ jobs:
               --ez autoStartSimulator true
 
             success=0
-            for i in $(seq 1 60); do
-              count=$(curl -fsS http://127.0.0.1:8788/v1/results | python -c 'import json,sys; print(len(json.load(sys.stdin)))' || echo 0)
+            i=1
+            while [ "$i" -le 60 ]; do
+              count=$(curl -fsS http://127.0.0.1:8788/v1/results | python -c "import json,sys; print(len(json.load(sys.stdin)))" || echo 0)
               if [ "$count" -ge 3 ]; then
                 success=1
                 break
               fi
+              i=$((i + 1))
               sleep 2
             done
 
@@ -172,7 +173,6 @@ jobs:
             fi
 
             curl -fsS http://127.0.0.1:8788/v1/results | tee e2e-results.json
-            '
 
       - name: Verify posted MediaPipe results
         shell: bash
