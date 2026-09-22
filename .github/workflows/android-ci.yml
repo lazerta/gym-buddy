@@ -32,7 +32,7 @@ jobs:
           gradle-version: "9.6.0"
 
       - name: JVM unit tests
-        run: gradle :domain:test :app:testDebugUnitTest --stacktrace
+        run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest --stacktrace
 
       - name: Assemble debug APK
         run: gradle :app:assembleDebug --stacktrace
