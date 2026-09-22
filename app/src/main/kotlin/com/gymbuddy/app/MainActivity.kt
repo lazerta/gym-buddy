@@ -97,6 +97,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContentView(layout)
+
+        if (intent.getBooleanExtra(EXTRA_AUTO_START_SIMULATOR, false)) {
+            startSimulator()
+        }
     }
 
     override fun onDestroy() {
@@ -205,6 +209,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SIMULATOR_BASE_URL =
             "simulatorBaseUrl"
+
+        const val EXTRA_AUTO_START_SIMULATOR =
+            "autoStartSimulator"
 
         const val DEFAULT_SIMULATOR_BASE_URL =
             "http://10.0.2.2:8788"
