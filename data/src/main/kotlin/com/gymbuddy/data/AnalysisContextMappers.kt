@@ -1,0 +1,26 @@
+package com.gymbuddy.data
+import com.gymbuddy.domain.profile.*
+
+internal fun analysisContextEntity(id:String,p:AnalysisProvenance)=AnalysisContextEntity(
+id,p.exerciseDefinitionId,p.exerciseDefinitionVersion,p.exerciseDefinitionSemanticHash,
+p.exerciseProfile.profileId,p.exerciseProfile.profileVersion,p.exerciseProfile.semanticHash,
+p.cameraProfile.profileId,p.cameraProfile.profileVersion,p.cameraProfile.semanticHash,
+p.signalProfile.profileId,p.signalProfile.profileVersion,p.signalProfile.semanticHash,
+p.movementPrimitiveSequence.profileId,p.movementPrimitiveSequence.profileVersion,p.movementPrimitiveSequence.semanticHash,
+p.metricProfile.profileId,p.metricProfile.profileVersion,p.metricProfile.semanticHash,
+p.formRuleSet.profileId,p.formRuleSet.profileVersion,p.formRuleSet.semanticHash,
+p.cuePolicy.profileId,p.cuePolicy.profileVersion,p.cuePolicy.semanticHash,
+p.equipmentProfile?.profileId,p.equipmentProfile?.profileVersion,p.equipmentProfile?.semanticHash,
+p.personalCalibrationProfile?.calibrationProfileId,p.personalCalibrationProfile?.profileVersion,p.personalCalibrationProfile?.semanticHash)
+
+internal fun AnalysisContextEntity.toAnalysisProvenance()=AnalysisProvenance(
+exerciseDefinitionId,exerciseDefinitionVersion,exerciseDefinitionSemanticHash,
+ProfileVersionRef(exerciseProfileId,exerciseProfileVersion,exerciseProfileSemanticHash),
+ProfileVersionRef(cameraProfileId,cameraProfileVersion,cameraProfileSemanticHash),
+ProfileVersionRef(signalProfileId,signalProfileVersion,signalProfileSemanticHash),
+ProfileVersionRef(primitiveProfileId,primitiveProfileVersion,primitiveProfileSemanticHash),
+ProfileVersionRef(metricProfileId,metricProfileVersion,metricProfileSemanticHash),
+ProfileVersionRef(formRuleSetId,formRuleSetVersion,formRuleSetSemanticHash),
+ProfileVersionRef(cuePolicyId,cuePolicyVersion,cuePolicySemanticHash),
+equipmentProfileId?.let{ProfileVersionRef(it,requireNotNull(equipmentProfileVersion),requireNotNull(equipmentProfileSemanticHash))},
+calibrationProfileId?.let{PersonalCalibrationVersionRef(it,requireNotNull(calibrationProfileVersion),requireNotNull(calibrationProfileSemanticHash))})
