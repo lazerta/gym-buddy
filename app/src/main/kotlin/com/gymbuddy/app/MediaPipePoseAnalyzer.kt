@@ -7,62 +7,26 @@ import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
+import com.gymbuddy.domain.pose.PoseFrame
+import com.gymbuddy.domain.pose.PoseFrameSource
 import com.gymbuddy.frames.FrameAnalyzer
+import com.gymbuddy.frames.FrameOrigin
 import com.gymbuddy.frames.FramePacket
-
-data class PosePoint(
-    val x: Double,
-    val y: Double,
-    val z: Double,
-    val visibility: Double?,
-    val presence: Double?,
-) {
-    fun toWireMap(): Map<String, Any?> = buildMap {
-        put("x", x)
-        put("y", y)
-        put("z", z)
-        visibility?.let {
-            put("visibility", it)
-        }
-        presence?.let {
-            put("presence", it)
-        }
-    }
-}
-
-data class PoseAnalysis(
-    val mediaPipeTimestampMs: Long,
-    val normalizedPoses: List<List<PosePoint>>,
-    val worldPoses: List<List<PosePoint>>,
-) {
-    fun toWireMap(): Map<String, Any?> = mapOf(
-        "mediapipe_timestamp_ms" to mediaPipeTimestampMs,
-        "pose_count" to normalizedPoses.size,
-        "landmarks" to normalizedPoses.map { pose ->
-            pose.map {
-                it.toWireMap()
-            }
-        },
-        "world_landmarks" to worldPoses.map { pose ->
-            pose.map {
-                it.toWireMap()
-            }
-        },
-    )
-}
 
 class MediaPipePoseAnalyzer(
     context: Context,
-    modelAssetPath: String =
-        "pose_landmarker_lite.task",
+    modelAssetPath: String = "pose_landmarker_lite.task",
     minPoseDetectionConfidence: Float = 0.5f,
     minPosePresenceConfidence: Float = 0.5f,
     minTrackingConfidence: Float = 0.5f,
-) : FrameAnalyzer<MPImage, PoseAnalysis>, AutoCloseable {
+    maxPoses: Int = 4,
+) : FrameAnalyzer<MPImage, PoseFrame>, AutoCloseable {
 
     private val landmarker: PoseLandmarker
 
     init {
+        require(maxPoses > 0) { "maxPoses must be > 0" }
+
         val baseOptions = BaseOptions.builder()
             .setModelAssetPath(modelAssetPath)
             .build()
@@ -72,16 +36,10 @@ class MediaPipePoseAnalyzer(
             .builder()
             .setBaseOptions(baseOptions)
             .setRunningMode(RunningMode.VIDEO)
-            .setNumPoses(1)
-            .setMinPoseDetectionConfidence(
-                minPoseDetectionConfidence
-            )
-            .setMinPosePresenceConfidence(
-                minPosePresenceConfidence
-            )
-            .setMinTrackingConfidence(
-                minTrackingConfidence
-            )
+            .setNumPoses(maxPoses)
+            .setMinPoseDetectionConfidence(minPoseDetectionConfidence)
+            .setMinPosePresenceConfidence(minPosePresenceConfidence)
+            .setMinTrackingConfidence(minTrackingConfidence)
             .setOutputSegmentationMasks(false)
             .build()
 
@@ -91,26 +49,24 @@ class MediaPipePoseAnalyzer(
         )
     }
 
-    override fun analyze(
-        frame: FramePacket<MPImage>,
-    ): PoseAnalysis {
+    override fun analyze(frame: FramePacket<MPImage>): PoseFrame {
         try {
             val result = landmarker.detectForVideo(
                 frame.image,
                 frame.mediaPipeTimestampMs,
             )
 
-            return PoseAnalysis(
-                mediaPipeTimestampMs = result.timestampMs(),
+            return MediaPipePoseFrameMapper.map(
+                frameId = frame.frameId,
+                timestampUs = frame.timestampUs,
+                width = frame.width,
+                height = frame.height,
+                source = frame.origin.toPoseFrameSource(),
                 normalizedPoses = result.landmarks().map { pose ->
-                    pose.map {
-                        normalizedPoint(it)
-                    }
+                    pose.map(::normalizedLandmark)
                 },
                 worldPoses = result.worldLandmarks().map { pose ->
-                    pose.map {
-                        worldPoint(it)
-                    }
+                    pose.map(::worldLandmark)
                 },
             )
         } finally {
@@ -122,43 +78,29 @@ class MediaPipePoseAnalyzer(
         landmarker.close()
     }
 
-    private fun normalizedPoint(
+    private fun normalizedLandmark(
         landmark: NormalizedLandmark,
-    ): PosePoint {
-        return PosePoint(
-            x = landmark.x().toDouble(),
-            y = landmark.y().toDouble(),
-            z = landmark.z().toDouble(),
-            visibility = landmark.visibility()
-                .map {
-                    it.toDouble()
-                }
-                .orElse(null),
-            presence = landmark.presence()
-                .map {
-                    it.toDouble()
-                }
-                .orElse(null),
-        )
-    }
+    ): PoseAdapterLandmark = PoseAdapterLandmark(
+        x = landmark.x().toDouble(),
+        y = landmark.y().toDouble(),
+        z = landmark.z().toDouble(),
+        visibility = landmark.visibility().map { it.toDouble() }.orElse(null),
+        presence = landmark.presence().map { it.toDouble() }.orElse(null),
+    )
 
-    private fun worldPoint(
+    private fun worldLandmark(
         landmark: Landmark,
-    ): PosePoint {
-        return PosePoint(
-            x = landmark.x().toDouble(),
-            y = landmark.y().toDouble(),
-            z = landmark.z().toDouble(),
-            visibility = landmark.visibility()
-                .map {
-                    it.toDouble()
-                }
-                .orElse(null),
-            presence = landmark.presence()
-                .map {
-                    it.toDouble()
-                }
-                .orElse(null),
-        )
+    ): PoseAdapterLandmark = PoseAdapterLandmark(
+        x = landmark.x().toDouble(),
+        y = landmark.y().toDouble(),
+        z = landmark.z().toDouble(),
+        visibility = landmark.visibility().map { it.toDouble() }.orElse(null),
+        presence = landmark.presence().map { it.toDouble() }.orElse(null),
+    )
+
+    private fun FrameOrigin.toPoseFrameSource(): PoseFrameSource = when (this) {
+        FrameOrigin.CAMERA -> PoseFrameSource.CAMERA
+        FrameOrigin.SIMULATOR -> PoseFrameSource.SIMULATOR
+        FrameOrigin.VIDEO -> PoseFrameSource.VIDEO
     }
 }

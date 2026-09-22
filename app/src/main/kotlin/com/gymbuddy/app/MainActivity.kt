@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.MPImage
+import com.gymbuddy.domain.pose.PoseFrame
 import com.gymbuddy.frames.FrameAnalysisLoop
 import com.gymbuddy.frames.FrameResultSink
 import com.gymbuddy.frames.FrameSource
@@ -121,10 +122,10 @@ class MainActivity : ComponentActivity() {
         currentSource = source
 
         val sink =
-            FrameResultSink<PoseAnalysis> { _, result ->
+            FrameResultSink<PoseFrame> { _, result ->
                 setStatus(
                     "Camera: poses=" +
-                        result.normalizedPoses.size
+                        result.candidates.size
                 )
             }
 
@@ -168,7 +169,7 @@ class MainActivity : ComponentActivity() {
                     SimulatorResultSink(
                         sessionId = session.sessionId,
                         transport = transport,
-                        encoder = PoseAnalysis::toWireMap,
+                        encoder = PoseFrameWireEncoder::encode,
                     )
 
                 source.start(
