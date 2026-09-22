@@ -31,8 +31,24 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
-      - name: JVM unit tests
+      - name: JVM and Room regression tests
         run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest --stacktrace
 
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Assemble debug and release APKs
+        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
+
+      - name: Verify release has no INTERNET permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find app/build/intermediates -type f -name AndroidManifest.xml -path '*release*' | sort)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "No merged release manifest found"
+            exit 1
+          fi
+          printf 'Checking %s\n' "${manifests[@]}"
+          if grep -H 'android.permission.INTERNET' "${manifests[@]}"; then
+            echo "Release manifest must not contain INTERNET permission"
+            exit 1
+          fi
+          echo "RELEASE_NO_INTERNET_PASS"

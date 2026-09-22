@@ -102,7 +102,7 @@ class ExerciseProfileDomainTest {
     private fun sampleExerciseProfile(profileVersion: Int = 1, semanticHash: String = "exercise-profile-hash") = ExerciseProfile(
         "incline-db-press-v1", profileVersion, semanticHash, "incline_dumbbell_press", LateralityMode.BILATERAL, setOf(EquipmentType.DUMBBELL),
         sampleCameraProfile(), sampleSignalProfile(), samplePrimitiveSequence(), sampleMetricProfile(), sampleFormRuleSet(), sampleCuePolicy(),
-        setOf(ProfileCapability.CAMERA_GUIDANCE, ProfileCapability.REP_DETECTION, ProfileCapability.FORM_ANALYSIS, ProfileCapability.BILATERAL_TIMING))
+        setOf(ProfileCapability.CAMERA_GUIDANCE, ProfileCapability.REP_DETECTION, ProfileCapability.FORM_ANALYSIS))
     private fun sampleEquipmentProfile(preferredViewOverride: ViewClass? = null, signalParameterOverrides: Map<String, Map<String, Double>> = emptyMap()) =
         EquipmentProfile("bench-a", 2, "equipment-hash-v2", EquipmentType.DUMBBELL, setOf("incline_dumbbell_press"), preferredViewOverride, signalParameterOverrides)
 }

@@ -118,6 +118,12 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
+      - name: Production movement vertical-slice gate
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.integration.InitialExerciseProfilesIntegrationTest
+          --stacktrace
+
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 
@@ -165,7 +171,7 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash .github/scripts/simulator-e2e.sh
 
-      - name: Verify posted MediaPipe results
+      - name: Verify posted MediaPipe and production results
         shell: bash
         run: |
           set -euo pipefail
@@ -177,6 +183,15 @@ jobs:
           assert len(results) == 3, results
 
           expected_ts = [0, 33333, 66667]
+          production_keys = {
+              "tracking_state",
+              "tracking_reason",
+              "camera_guidance",
+              "set_lifecycle_state",
+              "rep_count",
+              "rep_events",
+              "cues",
+          }
           for i, item in enumerate(results):
               assert item["session_id"] == "android-e2e"
               assert item["frame_id"] == i
@@ -186,8 +201,13 @@ jobs:
               assert "pose_count" in analysis
               assert "landmarks" in analysis
               assert "world_landmarks" in analysis
+              missing = production_keys - set(analysis)
+              assert not missing, (i, missing, analysis)
+              assert isinstance(analysis["rep_count"], int)
+              assert isinstance(analysis["rep_events"], list)
+              assert isinstance(analysis["cues"], list)
 
-          print("ANDROID_SIMULATOR_MEDIAPIPE_E2E_PASS")
+          print("ANDROID_SIMULATOR_MEDIAPIPE_PRODUCTION_E2E_PASS")
           PY
 
       - name: Upload E2E diagnostics
@@ -197,5 +217,6 @@ jobs:
           name: simulator-e2e-diagnostics
           path: |
             e2e-results.json
+            production-movement-e2e.json
             frame-server.log
           if-no-files-found: ignore
