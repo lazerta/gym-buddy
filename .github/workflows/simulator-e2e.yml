@@ -136,6 +136,18 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 
+      - name: Enable KVM
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo chown "$USER":"$(id -gn)" /dev/kvm
+            sudo chmod 660 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "/dev/kvm is not available on this runner"
+          fi
+
       - name: Run emulator E2E
         uses: reactivecircus/android-emulator-runner@v2
         with:
