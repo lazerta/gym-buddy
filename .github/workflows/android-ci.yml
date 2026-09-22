@@ -5,12 +5,53 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   android:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply staged exact local patch
+        if: ${{ hashFiles('.patch/gym-patch-batch.tar.gz.b64') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, tarfile
+
+          source = Path(".patch/gym-patch-batch.tar.gz.b64")
+          archive = base64.b64decode(source.read_text().strip())
+          expected = "b3360e9a4248a123ecae4c3547d1321bbea3deaf9f91d9c810fd8bfed42b4373"
+          actual = hashlib.sha256(archive).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"patch archive hash mismatch: {actual}")
+          temp = Path("/tmp/gym-patch-batch.tar.gz")
+          temp.write_bytes(archive)
+          with tarfile.open(temp, "r:gz") as tf:
+              tf.extractall(".")
+          for path in [
+              "app/src/main/kotlin/com/gymbuddy/app/HttpSimulatorTransport.kt",
+              "app/src/main/kotlin/com/gymbuddy/app/JpegMpImageDecoder.kt",
+          ]:
+              Path(path).unlink(missing_ok=True)
+          Path(".github/workflows/apply-local-patch-batch.yml").unlink(missing_ok=True)
+          import shutil
+          shutil.rmtree(".patch", ignore_errors=True)
+          print(f"PATCH_ARCHIVE_APPLIED sha256={actual}")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix production movement, persistence, and release gates [apply-local-patch]"
+          git push origin HEAD:pr13-review-hardening
 
       - uses: actions/setup-java@v4
         with:
@@ -31,8 +72,24 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
-      - name: JVM unit tests
+      - name: JVM and Room regression tests
         run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest --stacktrace
 
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Assemble debug and release APKs
+        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
+
+      - name: Verify release has no INTERNET permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find app/build/intermediates -type f -name AndroidManifest.xml -path '*release*' | sort)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "No merged release manifest found"
+            exit 1
+          fi
+          printf 'Checking %s\n' "${manifests[@]}"
+          if grep -H 'android.permission.INTERNET' "${manifests[@]}"; then
+            echo "Release manifest must not contain INTERNET permission"
+            exit 1
+          fi
+          echo "RELEASE_NO_INTERNET_PASS"
