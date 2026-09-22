@@ -69,13 +69,22 @@ class SetLifecycleController {
         return state
     }
 
+    fun confirmAutomaticEnd(): SetLifecycleState {
+        if (state == SetLifecycleState.POSSIBLE_END) {
+            state = SetLifecycleState.FINALIZING
+        }
+        return state
+    }
+
     fun manualEnd(): SetLifecycleState {
-        if (state != SetLifecycleState.ENDED) state = SetLifecycleState.FINALIZING
+        if (state == SetLifecycleState.ACTIVE_SET || state == SetLifecycleState.POSSIBLE_END) {
+            state = SetLifecycleState.FINALIZING
+        }
         return state
     }
 
     fun finalized(): SetLifecycleState {
-        if (state == SetLifecycleState.FINALIZING || state == SetLifecycleState.POSSIBLE_END) {
+        if (state == SetLifecycleState.FINALIZING) {
             state = SetLifecycleState.ENDED
         }
         return state
