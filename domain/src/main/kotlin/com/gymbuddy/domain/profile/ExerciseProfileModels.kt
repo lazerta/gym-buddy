@@ -133,12 +133,22 @@ data class SignalDefinition(
     val unit: SignalUnit,
     val requiredLandmarkIds: Set<String>,
     val parameters: Map<String, Double> = emptyMap(),
+    val orderedLandmarkIds: List<String> = emptyList(),
 ) {
     init {
         requireIdentifier(signalId, "signalId")
         require(requiredLandmarkIds.none { it.isBlank() }) { "requiredLandmarkIds must not contain blank values" }
         require(parameters.keys.none { it.isBlank() }) { "signal parameter names must not be blank" }
         require(parameters.values.all { it.isFinite() }) { "signal parameters must be finite" }
+        require(orderedLandmarkIds.none { it.isBlank() }) {
+            "orderedLandmarkIds must not contain blank values"
+        }
+        require(orderedLandmarkIds.distinct().size == orderedLandmarkIds.size) {
+            "orderedLandmarkIds must be unique"
+        }
+        require(orderedLandmarkIds.all { it in requiredLandmarkIds }) {
+            "orderedLandmarkIds must be a subset of requiredLandmarkIds"
+        }
     }
 }
 
