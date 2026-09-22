@@ -1,0 +1,57 @@
+name: apply-local-patch-batch
+
+on:
+  push:
+    branches: [pr13-review-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[apply-local-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact local patch archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, tarfile
+
+          source = Path(".patch/gym-patch-batch.tar.gz.b64")
+          archive = base64.b64decode(source.read_text().strip())
+          expected = "b3360e9a4248a123ecae4c3547d1321bbea3deaf9f91d9c810fd8bfed42b4373"
+          actual = hashlib.sha256(archive).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"patch archive hash mismatch: {actual}")
+          temp = Path("/tmp/gym-patch-batch.tar.gz")
+          temp.write_bytes(archive)
+          with tarfile.open(temp, "r:gz") as tf:
+              tf.extractall(".")
+          for path in [
+              "app/src/main/kotlin/com/gymbuddy/app/HttpSimulatorTransport.kt",
+              "app/src/main/kotlin/com/gymbuddy/app/JpegMpImageDecoder.kt",
+          ]:
+              Path(path).unlink(missing_ok=True)
+          print(f"PATCH_ARCHIVE_APPLIED sha256={actual}")
+          PY
+
+      - name: Commit applied source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git commit -m "Fix production movement, persistence, and release gates [apply-local-patch]"
+          git push origin HEAD:pr13-review-hardening
