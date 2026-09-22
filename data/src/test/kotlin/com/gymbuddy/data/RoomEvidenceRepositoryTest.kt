@@ -15,8 +15,11 @@ import com.gymbuddy.domain.profile.AnalysisConfigResolver
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.util.UUID
 
+@RunWith(RobolectricTestRunner::class)
 class RoomEvidenceRepositoryTest {
     private val context:Context get()=ApplicationProvider.getApplicationContext()
 
