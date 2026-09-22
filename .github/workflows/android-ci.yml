@@ -22,9 +22,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git checkout -B pr13-review-hardening origin/pr13-review-hardening
+
           python - <<'PY'
           from pathlib import Path
-          import base64, hashlib, tarfile
+          import base64, hashlib, tarfile, shutil
 
           source = Path(".patch/gym-patch-batch.tar.gz.b64")
           archive = base64.b64decode(source.read_text().strip())
@@ -41,11 +43,11 @@ jobs:
               "app/src/main/kotlin/com/gymbuddy/app/JpegMpImageDecoder.kt",
           ]:
               Path(path).unlink(missing_ok=True)
-          Path(".github/workflows/apply-local-patch-batch.yml").unlink(missing_ok=True)
-          import shutil
           shutil.rmtree(".patch", ignore_errors=True)
           print(f"PATCH_ARCHIVE_APPLIED sha256={actual}")
           PY
+
+          git checkout HEAD --             .github/workflows/android-ci.yml             .github/workflows/simulator-e2e.yml             .github/workflows/apply-local-patch-batch.yml
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
