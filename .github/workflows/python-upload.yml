@@ -1,0 +1,41 @@
+name: python-upload
+
+on:
+  push:
+    branches:
+      - "publisher-input/**"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: python-upload-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout publisher input
+        uses: actions/checkout@v4
+        with:
+          path: publisher-input
+
+      - name: Checkout trusted publisher from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: publisher-main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Upload batch and verify CI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python publisher-main/tools/github_batch_upload.py
+          --manifest publisher-input/.publisher/request.json
