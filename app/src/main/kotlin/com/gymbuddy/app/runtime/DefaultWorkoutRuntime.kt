@@ -10,7 +10,9 @@ import com.gymbuddy.app.ProductionPoseFrameProcessor
 import com.gymbuddy.app.TextToSpeechCueSink
 import com.gymbuddy.data.GymBuddyDatabaseFactory
 import com.gymbuddy.data.RoomEvidenceRepository
+import com.gymbuddy.data.RoomChatGptContextRepository
 import com.gymbuddy.data.RoomWorkoutFlowRepository
+import com.gymbuddy.domain.export.ChatGptContextExporter
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
@@ -33,6 +35,7 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
     private val database=GymBuddyDatabaseFactory.create(context.applicationContext)
     private val repository=RoomEvidenceRepository(database.evidenceDao())
     private val flowRepository=RoomWorkoutFlowRepository(database.evidenceDao())
+    private val chatGptExporter=ChatGptContextExporter(RoomChatGptContextRepository(database.evidenceDao()))
     private val ttsFeedback=TextToSpeechCueSink(context.applicationContext){delivery->
         if(!worker.isShutdown){
             runCatching{worker.execute{repository.persistCueDelivery(delivery)}}
@@ -201,6 +204,19 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
 
     override fun clearRestCheckpoint(){
         if(!worker.isShutdown)worker.execute{flowRepository.clearRestCheckpoint()}
+    }
+
+    override fun exportChatGptContext(
+        currentSetId:String,
+        onResult:(Result<String>)->Unit,
+    ){
+        if(worker.isShutdown){
+            onResult(Result.failure(IllegalStateException("Workout runtime is closed")))
+            return
+        }
+        worker.execute{
+            onResult(runCatching{chatGptExporter.export(currentSetId)})
+        }
     }
 
     override fun close(){
