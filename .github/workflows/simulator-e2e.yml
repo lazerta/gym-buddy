@@ -39,6 +39,12 @@ jobs:
           --harness-root harness-src
           --output build/harness-contracts/temporal-contracts.tsv
 
+      - name: Generate harness camera/tracking contracts
+        run: >-
+          python tools/generate_harness_camera_tracking_contracts.py
+          --harness-root harness-src
+          --output build/harness-contracts/camera-tracking-contracts.tsv
+
       - name: Prepare deterministic frame session
         shell: bash
         run: |
@@ -131,6 +137,14 @@ jobs:
         run: >-
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.HarnessTemporalContractTest
+          --stacktrace
+
+      - name: Harness-derived camera/tracking contract gate
+        env:
+          GYM_BUDDY_HARNESS_CAMERA_TRACKING_FIXTURE: ${{ github.workspace }}/build/harness-contracts/camera-tracking-contracts.tsv
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.integration.HarnessCameraTrackingContractTest
           --stacktrace
 
       - name: Production movement vertical-slice gate
