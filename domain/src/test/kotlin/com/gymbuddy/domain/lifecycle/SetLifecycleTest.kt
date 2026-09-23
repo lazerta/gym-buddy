@@ -48,6 +48,14 @@ class SetLifecycleTest {
         assertEquals(SetLifecycleState.ACTIVE_SET, lifecycle.onCameraGuidance(CameraGuidanceAction.CANNOT_ASSESS))
     }
 
+    @Test fun materialCameraInvalidationForcesActiveSetBackToGuidance() {
+        val lifecycle = active()
+        assertEquals(SetLifecycleState.CAMERA_GUIDANCE, lifecycle.invalidateCameraSetup())
+        assertEquals(SetLifecycleState.CAMERA_GUIDANCE, lifecycle.state)
+        assertEquals(SetLifecycleState.CAMERA_GUIDANCE, lifecycle.onMovement(frame(PrimitivePhase.OUTBOUND)))
+        assertEquals(SetLifecycleState.CAMERA_READY, lifecycle.onCameraGuidance(CameraGuidanceAction.CAMERA_READY))
+    }
+
     @Test fun inactivityAloneCannotAutoEndRestPause() {
         val lifecycle = active()
         assertEquals(SetLifecycleState.ACTIVE_SET, lifecycle.onEndEvidence(false))
