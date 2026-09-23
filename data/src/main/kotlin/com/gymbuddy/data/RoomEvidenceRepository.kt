@@ -9,7 +9,7 @@ import com.gymbuddy.domain.profile.*
 class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
     override fun ensureSession(r:WorkoutSessionRecord){val e=dao.session(r.sessionId);if(e==null)dao.insertSession(WorkoutSessionEntity(r.sessionId,r.startedAtUs))else require(e.startedAtUs==r.startedAtUs)}
     override fun ensureExecution(r:ExerciseExecutionRecord){requireNotNull(dao.session(r.sessionId));val e=dao.execution(r.executionId);if(e==null)dao.insertExecution(ExerciseExecutionEntity(r.executionId,r.sessionId,r.exerciseId,r.startedAtUs))else require(e.sessionId==r.sessionId&&e.exerciseId==r.exerciseId&&e.startedAtUs==r.startedAtUs)}
-    override fun openSet(r:SetRecord,c:AnalysisConfig){requireNotNull(dao.execution(r.executionId));val e=dao.set(r.setId);val x=analysisContextEntity(r.setId,c.provenance);if(e==null)dao.insertSetWithContext(SetEntity(r.setId,r.executionId,r.setOrdinal,r.startedAtUs),x)else{require(e.executionId==r.executionId&&e.setOrdinal==r.setOrdinal&&e.startedAtUs==r.startedAtUs);require(dao.analysisContext(r.setId)==x)}}
+    override fun openSet(r:SetRecord,c:AnalysisConfig){requireNotNull(dao.execution(r.executionId));val e=dao.set(r.setId);val x=analysisContextEntity(r.setId,c.provenance);if(e==null)dao.insertSetWithContext(SetEntity(r.setId,r.executionId,r.setOrdinal,r.startedAtUs,r.actualLoad?.value,r.actualLoad?.unit),x)else{require(e.executionId==r.executionId&&e.setOrdinal==r.setOrdinal&&e.startedAtUs==r.startedAtUs&&loadSnapshot(e.actualLoadValue,e.actualLoadUnit)==r.actualLoad);require(dao.analysisContext(r.setId)==x)}}
 
     override fun persistRep(setId:String,e:RepEvidence){val bundle=repEntities(setId,e);dao.insertRepBundle(bundle.rep,bundle.signals,bundle.metrics)}
     override fun persistFormObservation(setId:String,o:FormObservation){require(dao.rep(o.repId)?.setId==setId);dao.insertObservation(observationEntity(setId,o))}
@@ -50,8 +50,10 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
         val deliveries=dao.deliveriesForSet(setId).map{CueDeliveryRecord(it.cueId,CueDeliveryState.valueOf(it.state))}
         val tr=dao.trackingSummary(setId)?.let{TrackingQualitySummary(it.setId,it.observableFrames,it.degradedFrames,it.pausedFrames,it.unknownFrames)}
         val sum=dao.setSummary(setId)?.let{SetSummary(it.setId,it.endedAtUs,it.completedReps,it.assistedReps,it.uncertainReps)}
-        return PersistedSetEvidence(SetRecord(s.setId,s.executionId,s.setOrdinal,s.startedAtUs),ctx.toAnalysisProvenance(),reps,obs,cues,responses,tr,sum,deliveries)
+        return PersistedSetEvidence(SetRecord(s.setId,s.executionId,s.setOrdinal,s.startedAtUs,loadSnapshot(s.actualLoadValue,s.actualLoadUnit)),ctx.toAnalysisProvenance(),reps,obs,cues,responses,tr,sum,deliveries)
     }
+
+    private fun loadSnapshot(value:Double?,unit:String?):LoadSnapshot?{require(value!=null||unit==null);return value?.let{LoadSnapshot(it,unit)}}
 
     private data class RepEntities(val rep:RepEvidenceEntity,val signals:List<RepSignalEvidenceEntity>,val metrics:List<RepMetricEvidenceEntity>)
     private fun repEntities(setId:String,e:RepEvidence):RepEntities{

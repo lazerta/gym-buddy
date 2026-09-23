@@ -5,6 +5,6 @@ import androidx.room.Room
 
 object GymBuddyDatabaseFactory {
     fun create(context:Context,databaseName:String="gym-buddy.db"):GymBuddyDatabase = Room.databaseBuilder(context.applicationContext,GymBuddyDatabase::class.java,databaseName)
-        .addMigrations(GymBuddyMigrations.MIGRATION_1_2)
+        .addMigrations(*GymBuddyMigrations.ALL)
         .build()
 }

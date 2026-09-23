@@ -41,7 +41,7 @@ class RoomEvidenceRepositoryTest {
         val name="gym-test-${UUID.randomUUID()}.db"
         context.deleteDatabase(name)
         val ids:Ids
-        val firstDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build()
+        val firstDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(*GymBuddyMigrations.ALL).allowMainThreadQueries().build()
         try {
             val repo=RoomEvidenceRepository(firstDb.evidenceDao());ids=openSet(repo)
             val rep2=rep(2,"rep-2",2_000_000,ids.config.provenance)
@@ -51,7 +51,7 @@ class RoomEvidenceRepositoryTest {
             repo.persistCompletedRepBundle(ids.setId,rep1,listOf(obs(rep1,"obs-1")),listOf(CueEvidenceLink(cue,"obs-1")),emptyList())
             repo.persistCueDelivery(CueDeliveryRecord(cue.cueId,CueDeliveryState.COMPLETED))
         } finally { firstDb.close() }
-        val secondDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build()
+        val secondDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(*GymBuddyMigrations.ALL).allowMainThreadQueries().build()
         try {
             val loaded=RoomEvidenceRepository(secondDb.evidenceDao()).loadSet(ids.setId)!!
             assertEquals(listOf(1,2),loaded.reps.map{it.ordinal})
@@ -80,11 +80,74 @@ class RoomEvidenceRepositoryTest {
         val name="gym-migration-${UUID.randomUUID()}.db"
         context.deleteDatabase(name)
         createV1Database(name).close()
-        val migratedDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(GymBuddyMigrations.MIGRATION_1_2).allowMainThreadQueries().build()
+        val migratedDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name).addMigrations(*GymBuddyMigrations.ALL).allowMainThreadQueries().build()
         try {
             val cursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='cue_deliveries'")
             cursor.use { assertTrue(it.moveToFirst()) }
+            val flowCursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='workout_flow_states'")
+            flowCursor.use { assertTrue(it.moveToFirst()) }
+            val columnCursor=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`sets`)")
+            columnCursor.use {
+                val names=mutableSetOf<String>()
+                val nameIndex=it.getColumnIndexOrThrow("name")
+                while(it.moveToNext())names+=it.getString(nameIndex)
+                assertTrue("actualLoadValue" in names)
+                assertTrue("actualLoadUnit" in names)
+            }
         } finally { migratedDb.close() }
+        context.deleteDatabase(name)
+    }
+
+    @Test fun restCheckpointSurvivesReopenAndPlannedLoadNeverMutatesCompletedActualLoad() {
+        val name="gym-flow-${UUID.randomUUID()}.db"
+        context.deleteDatabase(name)
+        val bundle=InitialExerciseProfiles.inclineDumbbellPress
+        val config=AnalysisConfigResolver.resolve(bundle.definition,bundle.profile,bundle.equipment)
+
+        val firstDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name)
+            .addMigrations(*GymBuddyMigrations.ALL)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val evidence=RoomEvidenceRepository(firstDb.evidenceDao())
+            evidence.ensureSession(WorkoutSessionRecord("session-load",100))
+            evidence.ensureExecution(ExerciseExecutionRecord("exec-load","session-load",bundle.definition.exerciseId,100))
+            evidence.openSet(SetRecord("set-load","exec-load",1,200,LoadSnapshot(40.0,"lb")),config)
+            evidence.finishSet(SetSummary("set-load",300,0,0,0))
+            val flow=RoomWorkoutFlowRepository(firstDb.evidenceDao())
+            flow.saveRestCheckpoint(
+                RestCheckpointDraft(
+                    completedSetId="set-load",
+                    focus="Keep both sides moving together.",
+                    plannedNextLoad=LoadSnapshot(45.0,"lb"),
+                    restStartedAtEpochMs=1_234L,
+                )
+            )
+            flow.saveRestCheckpoint(
+                RestCheckpointDraft(
+                    completedSetId="set-load",
+                    focus="Keep both sides moving together.",
+                    plannedNextLoad=LoadSnapshot(50.0,"lb"),
+                    restStartedAtEpochMs=1_234L,
+                )
+            )
+        } finally { firstDb.close() }
+
+        val secondDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name)
+            .addMigrations(*GymBuddyMigrations.ALL)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val flow=RoomWorkoutFlowRepository(secondDb.evidenceDao()).loadRestCheckpoint()!!
+            assertEquals(40.0,flow.completedSet.actualLoad!!.value,0.0)
+            assertEquals("lb",flow.completedSet.actualLoad!!.unit)
+            assertEquals(50.0,flow.plannedNextLoad!!.value,0.0)
+            assertEquals("lb",flow.plannedNextLoad!!.unit)
+            assertEquals(0,flow.previousReps)
+            assertEquals(1_234L,flow.restStartedAtEpochMs)
+            val persistedSet=RoomEvidenceRepository(secondDb.evidenceDao()).loadSet("set-load")!!
+            assertEquals(40.0,persistedSet.set.actualLoad!!.value,0.0)
+        } finally { secondDb.close() }
         context.deleteDatabase(name)
     }
 

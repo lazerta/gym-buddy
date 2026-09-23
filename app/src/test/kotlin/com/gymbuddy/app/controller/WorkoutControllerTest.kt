@@ -2,9 +2,16 @@ package com.gymbuddy.app.controller
 
 import androidx.lifecycle.SavedStateHandle
 import com.google.mediapipe.framework.image.MPImage
+import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
 import com.gymbuddy.app.runtime.WorkoutRuntimeSnapshot
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
+import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
+import com.gymbuddy.domain.persistence.LoadSnapshot
+import com.gymbuddy.domain.persistence.RestCheckpoint
+import com.gymbuddy.domain.persistence.RestCheckpointDraft
+import com.gymbuddy.domain.persistence.SetRecord
+import com.gymbuddy.domain.persistence.WorkoutSessionRecord
 import com.gymbuddy.domain.profile.CameraGuidanceAction
 import com.gymbuddy.domain.tracking.TrackingQualityState
 import com.gymbuddy.frames.FrameConsumer
@@ -24,7 +31,7 @@ class WorkoutControllerTest {
         val state=controller.uiState.value
         assertTrue(state is WorkoutUiState.CameraSetup)
         assertEquals(listOf("incline_dumbbell_press"),runtime.exercises)
-        assertEquals(listOf(1),runtime.sets)
+        assertEquals(listOf(1 to null),runtime.sets)
     }
 
     @Test
@@ -59,7 +66,7 @@ class WorkoutControllerTest {
     }
 
     @Test
-    fun endSetEntersRestAndNextSetUsesEditedPlannedLoad(){
+    fun endSetEntersRestAndNextSetSnapshotsEditedPlannedLoad(){
         val runtime=FakeRuntime()
         val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{5_000L})
         controller.selectExercise("dumbbell_lateral_raise")
@@ -81,7 +88,7 @@ class WorkoutControllerTest {
 
         controller.updateNextLoad("25")
         controller.nextSet()
-        assertEquals(listOf(1,2),runtime.sets)
+        assertEquals(listOf(1 to null,2 to LoadSnapshot(25.0)),runtime.sets)
 
         controller.onRuntimeSnapshot(
             WorkoutRuntimeSnapshot(
@@ -96,16 +103,103 @@ class WorkoutControllerTest {
         assertEquals("25",active.actualLoadText)
     }
 
-    private class FakeRuntime:WorkoutRuntimeGateway{
+    @Test
+    fun persistedRestRestoresTimerExecutionAndKeepsActualSeparateFromPlanned(){
+        val checkpoint=checkpoint(
+            actual=LoadSnapshot(40.0,"lb"),
+            planned=LoadSnapshot(45.0,"lb"),
+            restStartedAt=123_000L,
+            reps=8,
+        )
+        val runtime=FakeRuntime(restToLoad=checkpoint)
+        val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{999_000L})
+
+        val rest=controller.uiState.value as WorkoutUiState.Rest
+        assertEquals(123_000L,rest.restStartedAtEpochMs)
+        assertEquals("40 lb",rest.previousActualLoadText)
+        assertEquals("45",rest.plannedNextLoadText)
+        assertEquals(8,rest.previousReps)
+        assertEquals("exec",runtime.resumedExecutionId)
+
+        controller.updateNextLoad("50")
+        val updated=runtime.savedRest.last()
+        assertEquals(50.0,updated.plannedNextLoad!!.value,0.0)
+        assertEquals("lb",updated.plannedNextLoad!!.unit)
+        assertEquals(40.0,checkpoint.completedSet.actualLoad!!.value,0.0)
+        assertEquals("40 lb",(controller.uiState.value as WorkoutUiState.Rest).previousActualLoadText)
+    }
+
+    private fun checkpoint(
+        actual:LoadSnapshot?,
+        planned:LoadSnapshot?,
+        restStartedAt:Long,
+        reps:Int,
+    )=RestCheckpoint(
+        session=WorkoutSessionRecord("session",100),
+        execution=ExerciseExecutionRecord("exec","session","smith_machine_squat",100),
+        completedSet=SetRecord("set","exec",1,200,actual),
+        previousReps=reps,
+        focus="Repeat the same setup.",
+        plannedNextLoad=planned,
+        restStartedAtEpochMs=restStartedAt,
+    )
+
+    private class FakeRuntime(
+        private val restToLoad:RestCheckpoint?=null,
+    ):WorkoutRuntimeGateway{
         val exercises=mutableListOf<String>()
-        val sets=mutableListOf<Int>()
+        val sets=mutableListOf<Pair<Int,LoadSnapshot?>>()
+        val savedRest=mutableListOf<RestCheckpointDraft>()
         var endedSets=0
+        var resumedExecutionId:String?=null
+        private var currentExercise="incline_dumbbell_press"
+        private var currentSetOrdinal=1
+        private var currentLoad:LoadSnapshot?=null
+
         override val analysisExecutor:Executor=Executor{it.run()}
-        override fun beginExercise(exerciseId:String){exercises+=exerciseId}
-        override fun beginSet(setOrdinal:Int){sets+=setOrdinal}
-        override fun endSet(){endedSets++}
+
+        override fun beginExercise(exerciseId:String){
+            exercises+=exerciseId
+            currentExercise=exerciseId
+        }
+
+        override fun resumeExercise(
+            session:WorkoutSessionRecord,
+            execution:ExerciseExecutionRecord,
+        ){
+            resumedExecutionId=execution.executionId
+            currentExercise=execution.exerciseId
+        }
+
+        override fun beginSet(setOrdinal:Int,actualLoad:LoadSnapshot?){
+            sets+=setOrdinal to actualLoad
+            currentSetOrdinal=setOrdinal
+            currentLoad=actualLoad
+        }
+
+        override fun endSet(onCompleted:(CompletedSetContext?)->Unit){
+            endedSets++
+            onCompleted(
+                CompletedSetContext(
+                    WorkoutSessionRecord("session",100),
+                    ExerciseExecutionRecord("exec","session",currentExercise,100),
+                    SetRecord("set-$currentSetOrdinal","exec",currentSetOrdinal,200,currentLoad),
+                )
+            )
+        }
+
         override fun frameConsumer(listener:(WorkoutRuntimeSnapshot)->Unit):FrameConsumer<MPImage> =
             FrameConsumer{_ ->}
+
+        override fun saveRestCheckpoint(checkpoint:RestCheckpointDraft){
+            savedRest+=checkpoint
+        }
+
+        override fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit){
+            onLoaded(restToLoad)
+        }
+
+        override fun clearRestCheckpoint()=Unit
         override fun close()=Unit
     }
 }

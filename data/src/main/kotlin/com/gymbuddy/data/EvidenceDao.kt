@@ -18,6 +18,7 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertCueDelivery(e:CueDeliveryEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertTrackingSummary(e:TrackingQualitySummaryEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertSetSummary(e:SetSummaryEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutFlowState(e:WorkoutFlowStateEntity)
 
     @Query("SELECT * FROM workout_sessions WHERE sessionId=:id") abstract fun session(id:String):WorkoutSessionEntity?
     @Query("SELECT * FROM exercise_executions WHERE executionId=:id") abstract fun execution(id:String):ExerciseExecutionEntity?
@@ -37,6 +38,8 @@ import androidx.room.*
     @Query("SELECT d.* FROM cue_deliveries d JOIN cue_events c ON c.cueId=d.cueId WHERE c.setId=:id ORDER BY c.emittedAtUs, d.cueId") abstract fun deliveriesForSet(id:String):List<CueDeliveryEntity>
     @Query("SELECT * FROM tracking_quality_summaries WHERE setId=:id") abstract fun trackingSummary(id:String):TrackingQualitySummaryEntity?
     @Query("SELECT * FROM set_summaries WHERE setId=:id") abstract fun setSummary(id:String):SetSummaryEntity?
+    @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
+    @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)
 
     @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){insertSet(s);insertAnalysisContext(c)}
     @Transaction open fun insertRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>){insertRep(r);if(s.isNotEmpty())insertSignals(s);if(m.isNotEmpty())insertMetrics(m)}
