@@ -12,7 +12,7 @@ private fun requireTimestamp(value:Long,field:String){require(value>=0L){ "$fiel
 
 data class WorkoutSessionRecord(val sessionId:String,val startedAtUs:Long){init{requireId(sessionId,"sessionId");requireTimestamp(startedAtUs,"startedAtUs")}}
 data class ExerciseExecutionRecord(val executionId:String,val sessionId:String,val exerciseId:String,val startedAtUs:Long){init{requireId(executionId,"executionId");requireId(sessionId,"sessionId");requireId(exerciseId,"exerciseId");requireTimestamp(startedAtUs,"startedAtUs")}}
-data class SetRecord(val setId:String,val executionId:String,val setOrdinal:Int,val startedAtUs:Long){init{requireId(setId,"setId");requireId(executionId,"executionId");require(setOrdinal>0);requireTimestamp(startedAtUs,"startedAtUs")}}
+data class SetRecord(val setId:String,val executionId:String,val setOrdinal:Int,val startedAtUs:Long,val actualLoad:LoadSnapshot?=null){init{requireId(setId,"setId");requireId(executionId,"executionId");require(setOrdinal>0);requireTimestamp(startedAtUs,"startedAtUs")}}
 data class TrackingQualitySummary(val setId:String,val observableFrames:Int,val degradedFrames:Int,val pausedFrames:Int,val unknownFrames:Int){init{requireId(setId,"setId");require(observableFrames>=0);require(degradedFrames>=0);require(pausedFrames>=0);require(unknownFrames>=0)}}
 data class SetSummary(val setId:String,val endedAtUs:Long,val completedReps:Int,val assistedReps:Int,val uncertainReps:Int){init{requireId(setId,"setId");requireTimestamp(endedAtUs,"endedAtUs");require(completedReps>=0);require(assistedReps>=0);require(uncertainReps>=0);require(assistedReps+uncertainReps<=completedReps)}}
 
