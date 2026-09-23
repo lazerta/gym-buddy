@@ -37,4 +37,5 @@ interface WorkoutRuntimeGateway:AutoCloseable {
     fun saveRestCheckpoint(checkpoint:RestCheckpointDraft)
     fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit)
     fun clearRestCheckpoint()
+    fun exportChatGptContext(currentSetId:String,onResult:(Result<String>)->Unit)
 }
