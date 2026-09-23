@@ -1,8 +1,10 @@
 package com.gymbuddy.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,6 +68,9 @@ class MainActivity:ComponentActivity(){
                 onNextLoadChange=controller::updateNextLoad,
                 onNextSet=controller::nextSet,
                 onFinishExercise=controller::finishExercise,
+                onAskChatGpt={
+                    controller.askChatGpt(::handleChatGptExport)
+                },
                 onReturnToExercises=controller::returnToSelection,
             )
         }
@@ -74,6 +79,28 @@ class MainActivity:ComponentActivity(){
     override fun onDestroy(){
         cameraBridge.close()
         super.onDestroy()
+    }
+
+    private fun handleChatGptExport(result:Result<String>){
+        runOnUiThread{
+            result.onSuccess(::shareChatGptContext)
+                .onFailure{
+                    Toast.makeText(
+                        this,
+                        "Unable to prepare workout context.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+        }
+    }
+
+    private fun shareChatGptContext(context:String){
+        val sendIntent=Intent(Intent.ACTION_SEND).apply{
+            type="text/plain"
+            putExtra(Intent.EXTRA_SUBJECT,"Gym Buddy workout context")
+            putExtra(Intent.EXTRA_TEXT,context)
+        }
+        startActivity(Intent.createChooser(sendIntent,"Ask ChatGPT"))
     }
 
     private fun handleCameraNeeded(needed:Boolean){
