@@ -1,0 +1,35 @@
+{
+  "base": "main",
+  "expected_base_sha": "f64113a513a11d88c5178b737df7ede373073acf",
+  "branch": "integration/python-publisher-hardening",
+  "commit_message": "Harden Python publishing, CI gates and PR reporting",
+  "pr_title": "Harden Python publishing, CI gates and PR reporting",
+  "pr_body": "Resumes the Python-owned pipeline before T28. Prevents stale/forced writes and vacuous CI PASS; pins CI to uploaded head; checks required steps; adds PR status reporting and explicit opt-in guarded merge. 43 local stdlib tests pass. No app, harness, or frozen UI changes. Device/video validation is unaffected.",
+  "auto_merge": false,
+  "dispatch_workflows": [
+    "android-ci.yml",
+    "simulator-e2e.yml"
+  ],
+  "files": [
+    {
+      "path": "tools/github_batch_upload.py",
+      "staged_path": "tools/github_batch_upload.py",
+      "sha256": "8e57e8ace91b0974266a732a9a36d9a041371e14849e456aa56303e9d1efed3b"
+    },
+    {
+      "path": "tools/tests/test_github_batch_upload.py",
+      "staged_path": "tools/tests/test_github_batch_upload.py",
+      "sha256": "33198c48aa39a34e4dce327d20602e008652b2dc7de5efb265cc39fc57ffad42"
+    },
+    {
+      "path": ".github/workflows/android-ci.yml",
+      "staged_path": ".github/workflows/android-ci.yml",
+      "sha256": "5ec7966c7746fb94e5970ace58a37c3683fff9c3c86e3360775ef5bd4d24fc73"
+    },
+    {
+      "path": ".github/workflows/python-upload.yml",
+      "staged_path": ".github/workflows/python-upload.yml",
+      "sha256": "bee99f348ae78ee0f88e1504a907fe1e26493ea0bb05d70710ca11da6aa86d31"
+    }
+  ]
+}

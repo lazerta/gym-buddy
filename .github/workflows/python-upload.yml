@@ -8,9 +8,10 @@ on:
 permissions:
   contents: write
   actions: write
+  pull-requests: write
 
 concurrency:
-  group: python-upload-${{ github.ref }}
+  group: python-upload
   cancel-in-progress: false
 
 jobs:
@@ -22,20 +23,113 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: publisher-input
+          persist-credentials: false
 
       - name: Checkout trusted publisher from main
         uses: actions/checkout@v4
         with:
           ref: main
           path: publisher-main
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: Validate input bytes and normalize transport encoding
+        run: |
+          python - <<'PYINPUT'
+          import base64, hashlib, json
+          from pathlib import Path
+          source = Path("publisher-input/.publisher/request.json")
+          manifest = json.loads(source.read_text(encoding="utf-8"))
+          for item in manifest["files"]:
+              if "staged_path" in item:
+                  if "content_utf8" in item or "content_base64" in item:
+                      raise ValueError("Ambiguous input encoding")
+                  root = Path("publisher-input/.publisher/payload").resolve()
+                  staged = (root / item.pop("staged_path")).resolve()
+                  if not staged.is_relative_to(root) or not staged.is_file():
+                      raise ValueError("Staged input must remain inside payload directory")
+                  item["content_utf8"] = staged.read_bytes().decode("utf-8")
+              if "content_utf8" in item:
+                  if "content_base64" in item:
+                      raise ValueError("Ambiguous input encoding")
+                  item["content_base64"] = base64.b64encode(item.pop("content_utf8").encode("utf-8")).decode("ascii")
+              raw = base64.b64decode(item["content_base64"], validate=True)
+              if hashlib.sha256(raw).hexdigest() != item["sha256"]:
+                  raise ValueError("Staging bytes differ from locally tested file: " + item["path"])
+          Path("publisher-request.json").write_text(json.dumps(manifest), encoding="utf-8")
+          PYINPUT
+
+      - name: Archive pinned public source for local review
+        run: git -C publisher-main archive --format=tar.gz HEAD > upstream-source.tar.gz
+
+      - name: Upload pinned source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: publisher-source-snapshot
+          path: upstream-source.tar.gz
+
       - name: Upload batch and verify CI
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          python publisher-main/tools/github_batch_upload.py
-          --manifest publisher-input/.publisher/request.json
+        run: |
+          set -euo pipefail
+          python -u publisher-main/tools/github_batch_upload.py --manifest publisher-request.json 2>&1 | tee publisher-output.log
+          cp "$GITHUB_STEP_SUMMARY" publisher-summary.md
+
+      - name: Open verified bootstrap review PR with Python
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PYPR'
+          import json, os, re, urllib.error, urllib.parse, urllib.request
+          from pathlib import Path
+          manifest = json.loads(Path("publisher-request.json").read_text())
+          output = Path("publisher-output.log").read_text()
+          matches = re.findall(r"^PYTHON_UPLOAD_COMMIT=([0-9a-f]{40})$", output, re.M)
+          if len(matches) != 1 or "PYTHON_UPLOAD_AND_CI_PASS" not in output:
+              raise RuntimeError("Missing verified publisher completion")
+          sha = matches[0]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          root = os.environ.get("GITHUB_API_URL", "https://api.github.com") + "/repos/" + repo
+          def api(method, suffix, body=None):
+              request = urllib.request.Request(root + suffix, method=method,
+                  data=None if body is None else json.dumps(body).encode(),
+                  headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                           "Accept": "application/vnd.github+json", "Content-Type": "application/json",
+                           "X-GitHub-Api-Version": "2022-11-28"})
+              try:
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise RuntimeError(str(error.code) + ": " + error.read().decode()[:2000]) from None
+          branch = manifest["branch"]
+          if api("GET", "/git/ref/heads/" + urllib.parse.quote(branch, safe=""))["object"]["sha"] != sha:
+              raise RuntimeError("Target moved after CI")
+          if api("GET", "/git/ref/heads/main")["object"]["sha"] != manifest["expected_base_sha"]:
+              raise RuntimeError("Base moved after CI")
+          query = urllib.parse.urlencode({"state": "open", "base": "main", "head": repo.split("/")[0] + ":" + branch})
+          existing = api("GET", "/pulls?" + query)
+          if existing:
+              if len(existing) != 1 or existing[0]["head"]["sha"] != sha:
+                  raise RuntimeError("Mismatched existing PR")
+              pr = existing[0]
+          else:
+              pr = api("POST", "/pulls", {"head": branch, "base": "main", "title": manifest["pr_title"],
+                  "body": manifest["pr_body"] + "\n\nPython-uploaded commit: `" + sha + "`. Both dispatched CI workflows passed. Bootstrap review; not merged."})
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          api("POST", "/issues/" + str(pr["number"]) + "/comments", {"body": Path("publisher-summary.md").read_text()})
+          with summary.open("a") as stream:
+              stream.write("\nReview PR: " + pr["html_url"] + "\n")
+          print("PUBLISHER_PR=" + pr["html_url"])
+          PYPR
+
+      - name: Upload publisher diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publisher-bootstrap-diagnostics
+          path: publisher-output.log
+          if-no-files-found: ignore

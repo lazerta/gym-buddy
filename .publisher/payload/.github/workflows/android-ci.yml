@@ -1,0 +1,65 @@
+name: android-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python publisher regression tests
+        run: python -m unittest discover -s tools/tests -v
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+
+      - name: JVM and Room regression tests
+        run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest --stacktrace
+
+      - name: Assemble debug and release APKs
+        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
+
+      - name: Verify release has no INTERNET permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find app/build/intermediates -type f -name AndroidManifest.xml -path '*release*' | sort)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "No merged release manifest found"
+            exit 1
+          fi
+          printf 'Checking %s\n' "${manifests[@]}"
+          if grep -H 'android.permission.INTERNET' "${manifests[@]}"; then
+            echo "Release manifest must not contain INTERNET permission"
+            exit 1
+          fi
+          echo "RELEASE_NO_INTERNET_PASS"
