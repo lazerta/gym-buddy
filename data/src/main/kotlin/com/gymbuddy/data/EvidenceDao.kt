@@ -38,6 +38,26 @@ import androidx.room.*
     @Query("SELECT d.* FROM cue_deliveries d JOIN cue_events c ON c.cueId=d.cueId WHERE c.setId=:id ORDER BY c.emittedAtUs, d.cueId") abstract fun deliveriesForSet(id:String):List<CueDeliveryEntity>
     @Query("SELECT * FROM tracking_quality_summaries WHERE setId=:id") abstract fun trackingSummary(id:String):TrackingQualitySummaryEntity?
     @Query("SELECT * FROM set_summaries WHERE setId=:id") abstract fun setSummary(id:String):SetSummaryEntity?
+    @Query("""
+        SELECT s.setId
+        FROM sets s
+        JOIN exercise_executions e ON e.executionId=s.executionId
+        JOIN set_summaries ss ON ss.setId=s.setId
+        WHERE e.exerciseId=:exerciseId
+          AND s.setId!=:currentSetId
+          AND (
+              ss.endedAtUs<:beforeEndedAtUs OR
+              (ss.endedAtUs=:beforeEndedAtUs AND s.setId<:currentSetId)
+          )
+        ORDER BY ss.endedAtUs DESC, s.setId DESC
+        LIMIT :limit
+    """)
+    abstract fun recentComparableSetIds(
+        exerciseId:String,
+        currentSetId:String,
+        beforeEndedAtUs:Long,
+        limit:Int,
+    ):List<String>
     @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)
 
