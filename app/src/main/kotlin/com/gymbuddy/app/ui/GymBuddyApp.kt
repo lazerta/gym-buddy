@@ -19,6 +19,7 @@ fun GymBuddyApp(
     onNextLoadChange:(String)->Unit,
     onNextSet:()->Unit,
     onFinishExercise:()->Unit,
+    onAskChatGpt:()->Unit,
     onReturnToExercises:()->Unit,
 ){
     LaunchedEffect(state.requiresCamera){
@@ -45,6 +46,7 @@ fun GymBuddyApp(
             )
             is WorkoutUiState.Summary->ExerciseSummaryScreen(
                 state=state,
+                onAskChatGpt=onAskChatGpt,
                 onReturnToExercises=onReturnToExercises,
             )
         }
