@@ -8,13 +8,25 @@ import com.gymbuddy.domain.tracking.PrimarySubjectLockResult
 import com.gymbuddy.domain.tracking.PrimarySubjectLockState
 import com.gymbuddy.domain.tracking.TrackingObservationContext
 
-class CameraGuidanceEngine(private val readyDwellFrames:Int=2) {
-    init { require(readyDwellFrames >= 1) }
+class CameraGuidanceEngine(
+    private val readyDwellFrames:Int=2,
+    private val knownSetupReadyDwellFrames:Int=1,
+) {
+    init {
+        require(readyDwellFrames >= 1)
+        require(knownSetupReadyDwellFrames >= 1)
+    }
     private var consecutiveReadyFrames=0
     private var lastTargetIndex:Int?=null
     fun reset(){consecutiveReadyFrames=0;lastTargetIndex=null}
 
-    fun evaluate(frame:PoseFrame,lock:PrimarySubjectLockResult,profile:CameraProfile,context:TrackingObservationContext=TrackingObservationContext()):CameraGuidanceAction {
+    fun evaluate(
+        frame:PoseFrame,
+        lock:PrimarySubjectLockResult,
+        profile:CameraProfile,
+        context:TrackingObservationContext=TrackingObservationContext(),
+        personalPrior:PersonalCameraPrior?=null,
+    ):CameraGuidanceAction {
         if(lock.state!=PrimarySubjectLockState.LOCKED)return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
         val targetIndex=lock.targetCandidateIndex?:return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
         val target=frame.candidates.firstOrNull{it.candidateIndex==targetIndex}?:return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
@@ -42,7 +54,14 @@ class CameraGuidanceEngine(private val readyDwellFrames:Int=2) {
 
         if(lastTargetIndex!=targetIndex){consecutiveReadyFrames=0;lastTargetIndex=targetIndex}
         consecutiveReadyFrames++
-        return if(consecutiveReadyFrames>=readyDwellFrames)CameraGuidanceAction.CAMERA_READY else CameraGuidanceAction.CANNOT_ASSESS
+        val requiredDwell=if(
+            personalPrior?.matchesKnownSetup(profile,observedView,fill)==true
+        ){
+            minOf(readyDwellFrames,knownSetupReadyDwellFrames)
+        }else{
+            readyDwellFrames
+        }
+        return if(consecutiveReadyFrames>=requiredDwell)CameraGuidanceAction.CAMERA_READY else CameraGuidanceAction.CANNOT_ASSESS
     }
 
     private fun notReady(profile:CameraProfile,action:CameraGuidanceAction):CameraGuidanceAction {
