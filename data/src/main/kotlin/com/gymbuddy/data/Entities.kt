@@ -15,5 +15,4 @@ import androidx.room.*
 @Entity(tableName="set_summaries",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)]) data class SetSummaryEntity(@PrimaryKey val setId:String,val endedAtUs:Long,val completedReps:Int,val assistedReps:Int,val uncertainReps:Int)
 
 @Entity(tableName="workout_flow_states",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["completedSetId"],onDelete=ForeignKey.CASCADE)],indices=[Index("completedSetId")]) data class WorkoutFlowStateEntity(@PrimaryKey val checkpointId:String,val completedSetId:String,val focus:String,val plannedNextLoadValue:Double?,val plannedNextLoadUnit:String?,val restStartedAtEpochMs:Long)
-
 @Entity(tableName="personal_calibration_profiles") data class PersonalCalibrationProfileEntity(@PrimaryKey val slotId:String,val calibrationProfileId:String,val profileVersion:Int,val semanticHash:String,val payload:String)
