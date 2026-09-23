@@ -1,41 +1,157 @@
-name: python-upload
+name: publisher-reconcile-verification
 
 on:
   push:
-    branches:
-      - "publisher-input/**"
+    branches: [publisher-input/python-publisher-reconcile-t28]
 
 permissions:
   contents: write
   actions: write
+  pull-requests: write
 
 concurrency:
-  group: python-upload-${{ github.ref }}
+  group: publisher-reconcile-verification
   cancel-in-progress: false
 
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
-      - name: Checkout publisher input
+      - name: Checkout exact reviewed publisher
         uses: actions/checkout@v4
         with:
-          path: publisher-input
-
-      - name: Checkout trusted publisher from main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: publisher-main
-
+          ref: a3b6a96999b876dc6d7f76aaa678fc681d8b92b0
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Upload batch and verify CI
+      - name: Verify reviewed publisher and regressions
+        run: |
+          python - <<'PYHASH'
+          import hashlib
+          from pathlib import Path
+          expected = {
+              "tools/github_batch_upload.py": "8e57e8ace91b0974266a732a9a36d9a041371e14849e456aa56303e9d1efed3b",
+              "tools/tests/test_github_batch_upload.py": "33198c48aa39a34e4dce327d20602e008652b2dc7de5efb265cc39fc57ffad42",
+          }
+          for path, digest in expected.items():
+              if hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest:
+                  raise RuntimeError("Reviewed source hash mismatch: " + path)
+          PYHASH
+          python -m unittest discover -s tools/tests -v
+      - name: Reconcile non-overlapping main with Python
+        id: reconcile
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          python publisher-main/tools/github_batch_upload.py
-          --manifest publisher-input/.publisher/request.json
+        run: |
+          python -u - <<'PYMERGE'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path("tools").resolve()))
+          import github_batch_upload as p
+          auth = {"repo": os.environ["GITHUB_REPOSITORY"], "token": os.environ["GITHUB_TOKEN"], "api_url": os.environ.get("GITHUB_API_URL", "https://api.github.com")}
+          base = "f64113a513a11d88c5178b737df7ede373073acf"
+          main = "deb7aec152042a0b90614b6a36267c95eac249ab"
+          head = "a3b6a96999b876dc6d7f76aaa678fc681d8b92b0"
+          branch = "integration/python-publisher-hardening"
+          expected_tree = "30fc19cc586269778412b0e5d18d00678dc8dc67"
+          def api(method, suffix, body=None):
+              return p.api_request(method, p.repo_path(auth["repo"], suffix), token=auth["token"], api_url=auth["api_url"], body=body)
+          p.require_head("main", main, **auth)
+          p.require_head(branch, head, **auth)
+          ours = api("GET", f"compare/{base}...{head}")
+          theirs = api("GET", f"compare/{base}...{main}")
+          our_paths = {f["filename"] for f in ours["files"]}
+          their_paths = {f["filename"] for f in theirs["files"]}
+          if ours["status"] != "ahead" or theirs["status"] != "ahead" or our_paths & their_paths:
+              raise RuntimeError("Changes overlap or ancestry differs; explicit reconciliation required")
+          if len(their_paths) != 4 or any(not path.startswith("domain/src/") for path in their_paths):
+              raise RuntimeError("Incoming main differs from the reviewed T28 change")
+          parent = api("GET", f"git/commits/{head}")
+          main_commit = api("GET", f"git/commits/{main}")
+          main_tree = api("GET", f"git/trees/{main_commit['tree']['sha']}?recursive=1")
+          if main_tree.get("truncated"):
+              raise RuntimeError("Incomplete tree")
+          entries = [{k: item[k] for k in ("path", "mode", "type", "sha")} for item in main_tree["tree"] if item["path"] in their_paths]
+          if len(entries) != 4 or any(e["type"] != "blob" or e["mode"] != "100644" for e in entries):
+              raise RuntimeError("Unexpected incoming file type or missing path")
+          tree = api("POST", "git/trees", {"base_tree": parent["tree"]["sha"], "tree": entries})
+          if tree["sha"] != expected_tree:
+              raise RuntimeError("Combined tree differs from independent local computation")
+          commit = api("POST", "git/commits", {"message": "Merge verified T28 main into Python publisher branch", "tree": tree["sha"], "parents": [head, main]})
+          p.require_head("main", main, **auth)
+          p.require_head(branch, head, **auth)
+          api("PATCH", f"git/refs/heads/{p.q(branch)}", {"sha": commit["sha"], "force": False})
+          p.require_head(branch, commit["sha"], **auth)
+          Path("reconciled-head.json").write_text(json.dumps({"head_sha": commit["sha"], "base_sha": main, "tree_sha": tree["sha"]}))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as out:
+              out.write("head_sha=" + commit["sha"] + "\n")
+          print("PYTHON_RECONCILED_HEAD=" + commit["sha"])
+          PYMERGE
+      - name: Checkout reconciled snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.reconcile.outputs.head_sha }}
+          path: combined
+          persist-credentials: false
+      - name: Archive reconciled source
+        run: git -C combined archive --format=tar.gz HEAD > reconciled-source.tar.gz
+      - name: Upload reconciled source
+        uses: actions/upload-artifact@v4
+        with:
+          name: publisher-reconciled-source
+          path: reconciled-source.tar.gz
+      - name: Verify combined SHA and report PR with Python
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -u - <<'PYVERIFY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path("tools").resolve()))
+          import github_batch_upload as p
+          auth = {"repo": os.environ["GITHUB_REPOSITORY"], "token": os.environ["GITHUB_TOKEN"],
+                  "api_url": os.environ.get("GITHUB_API_URL", "https://api.github.com")}
+          sha = json.loads(Path("reconciled-head.json").read_text())["head_sha"]
+          manifest = {"base": "main", "expected_base_sha": "deb7aec152042a0b90614b6a36267c95eac249ab",
+                      "branch": "integration/python-publisher-hardening",
+                      "commit_message": "Harden Python publisher and CI verification",
+                      "pr_title": "Harden Python publisher and CI verification",
+                      "pr_body": "Python-uploaded publisher and 43 regression tests, with a one-time connector bootstrap for workflow-file permissions. Blocks stale/forced writes, missing or skipped gates, stale CI, and unsafe automatic merging. Both final-SHA workflows are explicitly dispatched and step-verified. This PR adds no app logic, frozen UI, harness, or private data changes relative to current main. It preserves T28 PR #30 through a non-forced two-parent merge. Initial local payload staging still uses the connector; target-branch publication and CI orchestration are Python-owned.",
+                      "auto_merge": False}
+          runs = []
+          pr = None
+          try:
+              p.require_head("main", manifest["expected_base_sha"], **auth)
+              p.require_head(manifest["branch"], sha, **auth)
+              floors = {}
+              for workflow in p.REQUIRED_WORKFLOWS:
+                  floors[workflow] = max((r["id"] for r in p.workflow_runs(workflow, manifest["branch"], **auth)), default=0)
+                  p.require_head(manifest["branch"], sha, **auth)
+                  p.dispatch_workflow(workflow, manifest["branch"], **auth)
+              runs = p.wait_for_workflows(list(p.REQUIRED_WORKFLOWS), manifest["branch"], sha,
+                                         **auth, timeout_seconds=2700, after_run_ids=floors)
+              Path("final-gate-results.json").write_text(json.dumps(runs, indent=2))
+              p.require_head("main", manifest["expected_base_sha"], **auth)
+              pr = p.ensure_pull_request(manifest, sha, **auth)
+              text = p.write_summary(manifest, sha, runs, status="CI_PASS_AWAITING_REVIEW", pr_url=pr["html_url"])
+              p.post_status(pr["number"], text, **auth)
+              print("FINAL_SHA_ALL_REQUIRED_GATES_PASS")
+              print("PUBLISHER_PR=" + pr["html_url"])
+          except Exception as exc:
+              error = str(exc).replace(auth["token"], "[REDACTED]")
+              p.write_summary(manifest, sha, runs, status="FAILED", error=error,
+                              pr_url=pr["html_url"] if pr else None)
+              print(error, file=sys.stderr)
+              raise SystemExit(1)
+          PYVERIFY
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publisher-reconciled-gates
+          path: |
+            reconciled-head.json
+            final-gate-results.json
+          if-no-files-found: ignore
