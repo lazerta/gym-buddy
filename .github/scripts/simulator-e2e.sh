@@ -1,13 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+PACKAGE=com.gymbuddy.app
+HOST_PORT=8788
+DEVICE_PORT=8788
 
-adb shell am start -W   -n com.gymbuddy.app/.SimulatorE2EActivity   --es simulatorBaseUrl http://10.0.2.2:8788
+cleanup() {
+  adb reverse --remove "tcp:${DEVICE_PORT}" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+rm -f e2e-results.json production-movement-e2e.json
+
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell pm clear "$PACKAGE" >/dev/null
+adb reverse "tcp:${DEVICE_PORT}" "tcp:${HOST_PORT}"
+adb logcat -c || true
+
+adb shell am start -W \
+  -n "$PACKAGE/.SimulatorE2EActivity" \
+  --es simulatorBaseUrl "http://127.0.0.1:${DEVICE_PORT}"
 
 success=0
 for i in $(seq 1 60); do
-  count=$(curl -fsS http://127.0.0.1:8788/v1/results | python -c "import json,sys; print(len(json.load(sys.stdin)))" || echo 0)
+  count=$(curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/results" | python -c "import json,sys; print(len(json.load(sys.stdin)))" || echo 0)
   if [ "$count" -ge 3 ]; then
     success=1
     break
@@ -17,18 +33,19 @@ done
 
 if [ "$success" -ne 1 ]; then
   echo "E2E timed out waiting for 3 results"
+  adb shell dumpsys activity top || true
   adb logcat -d | tail -n 400
-  curl -fsS http://127.0.0.1:8788/v1/results || true
+  curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/results" || true
   exit 1
 fi
 
-curl -fsS http://127.0.0.1:8788/v1/results | tee e2e-results.json
+curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/results" | tee e2e-results.json
 
-adb shell am start -W -n com.gymbuddy.app/.ProductionMovementE2EActivity
+adb shell am start -W -n "$PACKAGE/.ProductionMovementE2EActivity"
 
 passed=0
 for i in $(seq 1 30); do
-  if adb shell run-as com.gymbuddy.app cat files/production-movement-e2e.json > production-movement-e2e.json 2>/dev/null; then
+  if adb shell run-as "$PACKAGE" cat files/production-movement-e2e.json > production-movement-e2e.json 2>/dev/null; then
     if python - <<'PY'
 import json
 from pathlib import Path
