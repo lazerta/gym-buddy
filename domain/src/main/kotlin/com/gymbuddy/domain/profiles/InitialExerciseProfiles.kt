@@ -71,6 +71,12 @@ object InitialExerciseProfiles {
         MetricDefinition("bilateral_timing_ms",setOf("left_progress","right_progress"),SignalUnit.MILLISECONDS,MetricAggregation.CROSSING_TIME_DIFFERENCE,mapOf("threshold" to .80)),
         MetricDefinition("press_elbow_path_flare_deg",setOf("left_elbow_path_angle","right_elbow_path_angle"),SignalUnit.DEGREES,MetricAggregation.MAX),
     ))
+    private fun smithSquatMetrics()=MetricProfile("$SQUAT_ID-metrics",3,"$SQUAT_ID-metrics-v3",listOf(
+        MetricDefinition("left_rom",setOf("left_progress"),SignalUnit.NORMALIZED,MetricAggregation.RANGE),
+        MetricDefinition("right_rom",setOf("right_progress"),SignalUnit.NORMALIZED,MetricAggregation.RANGE),
+        MetricDefinition("bilateral_asymmetry",setOf("left_progress","right_progress"),SignalUnit.NORMALIZED,MetricAggregation.ABS_DIFFERENCE),
+        MetricDefinition("bilateral_timing_ms",setOf("left_progress","right_progress"),SignalUnit.MILLISECONDS,MetricAggregation.CROSSING_TIME_DIFFERENCE,mapOf("threshold" to .80)),
+    ))
     private fun rules(id:String)=FormRuleSet("$id-rules",2,"$id-rules-v2",listOf(
         FormRule("bilateral_asymmetry",2,setOf("left_progress","right_progress"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_ABS_DIFFERENCE,.18)
     ))
@@ -109,7 +115,15 @@ object InitialExerciseProfiles {
     val smithMachineSquat:ExerciseBundle by lazy{
         val req=setOf("left_shoulder","right_shoulder","left_hip","right_hip","left_knee","right_knee","left_ankle","right_ankle")
         val sig=bilateralSignals(SQUAT_ID,listOf("left_hip","left_knee","left_ankle"),listOf("right_hip","right_knee","right_ankle"),-1.0/80.0,170.0/80.0)
-        val p=profile(SQUAT_ID,EquipmentType.SMITH_MACHINE,camera(SQUAT_ID,2,ViewClass.SIDE,setOf(ViewClass.SIDE,ViewClass.SIDE_OBLIQUE),req),sig,primitive(SQUAT_ID,MovementPrimitive.SQUAT))
+        val p=profile(
+            SQUAT_ID,
+            EquipmentType.SMITH_MACHINE,
+            camera(SQUAT_ID,2,ViewClass.SIDE,setOf(ViewClass.SIDE,ViewClass.SIDE_OBLIQUE),req),
+            sig,
+            primitive(SQUAT_ID,MovementPrimitive.SQUAT),
+            metricProfile=smithSquatMetrics(),
+            version=3,
+        )
         ExerciseBundle(ExerciseDefinition(SQUAT_ID,1,"$SQUAT_ID-def-v1","Smith Machine Squat",setOf("smith squat","smith_squat"),MovementFamily.SQUAT),p,smithGeneric)
     }
     val dumbbellLateralRaise:ExerciseBundle by lazy{
