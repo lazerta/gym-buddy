@@ -149,22 +149,27 @@ class ChatGptContextExporter(
         )
     }
 
-    private fun provenance(p:AnalysisProvenance)=obj(
-        "exercise_definition" to obj(
-            "id" to str(p.exerciseDefinitionId),
-            "version" to num(p.exerciseDefinitionVersion),
-            "semantic_hash" to str(p.exerciseDefinitionSemanticHash),
-        ),
-        "exercise_profile" to profileRef(p.exerciseProfile),
-        "camera_profile" to profileRef(p.cameraProfile),
-        "signal_profile" to profileRef(p.signalProfile),
-        "movement_primitive_sequence" to profileRef(p.movementPrimitiveSequence),
-        "metric_profile" to profileRef(p.metricProfile),
-        "form_rule_set" to profileRef(p.formRuleSet),
-        "cue_policy" to profileRef(p.cuePolicy),
-        "equipment_profile" to p.equipmentProfile?.let(::profileRef)?:"null",
-        "personal_calibration_profile" to p.personalCalibrationProfile?.let(::calibrationRef)?:"null",
-    )
+    private fun provenance(p:AnalysisProvenance):String{
+        val equipmentProfileJson:String=p.equipmentProfile?.let(::profileRef)?:"null"
+        val personalCalibrationJson:String=
+            p.personalCalibrationProfile?.let(::calibrationRef)?:"null"
+        return obj(
+            "exercise_definition" to obj(
+                "id" to str(p.exerciseDefinitionId),
+                "version" to num(p.exerciseDefinitionVersion),
+                "semantic_hash" to str(p.exerciseDefinitionSemanticHash),
+            ),
+            "exercise_profile" to profileRef(p.exerciseProfile),
+            "camera_profile" to profileRef(p.cameraProfile),
+            "signal_profile" to profileRef(p.signalProfile),
+            "movement_primitive_sequence" to profileRef(p.movementPrimitiveSequence),
+            "metric_profile" to profileRef(p.metricProfile),
+            "form_rule_set" to profileRef(p.formRuleSet),
+            "cue_policy" to profileRef(p.cuePolicy),
+            "equipment_profile" to equipmentProfileJson,
+            "personal_calibration_profile" to personalCalibrationJson,
+        )
+    }
 
     private fun profileRef(ref:ProfileVersionRef)=obj(
         "id" to str(ref.profileId),
