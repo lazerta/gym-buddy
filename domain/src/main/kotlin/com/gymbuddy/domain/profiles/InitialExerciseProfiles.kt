@@ -52,6 +52,34 @@ object InitialExerciseProfiles {
             ),
         )
     )
+    private fun lateralRaiseSignals()=SignalProfile(
+        "$RAISE_ID-signals",3,"$RAISE_ID-signals-v3",listOf(
+            SignalDefinition(
+                "left_progress",SignalKind.JOINT_ANGLE,SignalUnit.NORMALIZED,
+                setOf("left_hip","left_shoulder","left_elbow"),
+                mapOf("scale" to 1.0/70.0,"offset" to -20.0/70.0,"min_signal_confidence" to .50),
+                listOf("left_hip","left_shoulder","left_elbow"),
+            ),
+            SignalDefinition(
+                "right_progress",SignalKind.JOINT_ANGLE,SignalUnit.NORMALIZED,
+                setOf("right_hip","right_shoulder","right_elbow"),
+                mapOf("scale" to 1.0/70.0,"offset" to -20.0/70.0,"min_signal_confidence" to .50),
+                listOf("right_hip","right_shoulder","right_elbow"),
+            ),
+            SignalDefinition(
+                "left_arm_elevation_deg",SignalKind.JOINT_ANGLE,SignalUnit.DEGREES,
+                setOf("left_hip","left_shoulder","left_elbow"),
+                mapOf("min_signal_confidence" to .50),
+                listOf("left_hip","left_shoulder","left_elbow"),
+            ),
+            SignalDefinition(
+                "right_arm_elevation_deg",SignalKind.JOINT_ANGLE,SignalUnit.DEGREES,
+                setOf("right_hip","right_shoulder","right_elbow"),
+                mapOf("min_signal_confidence" to .50),
+                listOf("right_hip","right_shoulder","right_elbow"),
+            ),
+        )
+    )
     private fun primitive(id:String,p:MovementPrimitive)=MovementPrimitiveSequence(
         "$id-primitive",2,"$id-primitive-v2",listOf(MovementPrimitiveStep("cycle",p,listOf("left_progress","right_progress"),mapOf(
             "start_max" to .20,"end_min" to .80,"stable_start_us" to 100_000.0,"pause_velocity_threshold" to .025,
@@ -77,12 +105,23 @@ object InitialExerciseProfiles {
         MetricDefinition("bilateral_asymmetry",setOf("left_progress","right_progress"),SignalUnit.NORMALIZED,MetricAggregation.ABS_DIFFERENCE),
         MetricDefinition("bilateral_timing_ms",setOf("left_progress","right_progress"),SignalUnit.MILLISECONDS,MetricAggregation.CROSSING_TIME_DIFFERENCE,mapOf("threshold" to .80)),
     ))
+    private fun lateralRaiseMetrics()=MetricProfile("$RAISE_ID-metrics",3,"$RAISE_ID-metrics-v3",listOf(
+        MetricDefinition("left_rom",setOf("left_progress"),SignalUnit.NORMALIZED,MetricAggregation.RANGE),
+        MetricDefinition("right_rom",setOf("right_progress"),SignalUnit.NORMALIZED,MetricAggregation.RANGE),
+        MetricDefinition("bilateral_asymmetry",setOf("left_progress","right_progress"),SignalUnit.NORMALIZED,MetricAggregation.ABS_DIFFERENCE),
+        MetricDefinition("bilateral_timing_ms",setOf("left_progress","right_progress"),SignalUnit.MILLISECONDS,MetricAggregation.CROSSING_TIME_DIFFERENCE,mapOf("threshold" to .80)),
+        MetricDefinition("arm_elevation_peak_deg",setOf("left_arm_elevation_deg","right_arm_elevation_deg"),SignalUnit.DEGREES,MetricAggregation.MAX),
+    ))
     private fun rules(id:String)=FormRuleSet("$id-rules",2,"$id-rules-v2",listOf(
         FormRule("bilateral_asymmetry",2,setOf("left_progress","right_progress"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_ABS_DIFFERENCE,.18)
     ))
     private fun inclinePressRules()=FormRuleSet("$PRESS_ID-rules",3,"$PRESS_ID-rules-v3",listOf(
         FormRule("bilateral_asymmetry",2,setOf("left_progress","right_progress"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_ABS_DIFFERENCE,.18),
         FormRule("press_elbow_path_flare",1,setOf("left_elbow_path_angle","right_elbow_path_angle"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_VALUE,80.0),
+    ))
+    private fun lateralRaiseRules()=FormRuleSet("$RAISE_ID-rules",3,"$RAISE_ID-rules-v3",listOf(
+        FormRule("bilateral_asymmetry",2,setOf("left_progress","right_progress"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_ABS_DIFFERENCE,.18),
+        FormRule("lateral_raise_over_elevation",1,setOf("left_arm_elevation_deg","right_arm_elevation_deg"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_VALUE,105.0),
     ))
     private fun profile(
         id:String,
@@ -128,8 +167,16 @@ object InitialExerciseProfiles {
     }
     val dumbbellLateralRaise:ExerciseBundle by lazy{
         val req=setOf("left_shoulder","right_shoulder","left_elbow","right_elbow","left_wrist","right_wrist","left_hip","right_hip")
-        val sig=bilateralSignals(RAISE_ID,listOf("left_hip","left_shoulder","left_elbow"),listOf("right_hip","right_shoulder","right_elbow"),1.0/70.0,-20.0/70.0)
-        val p=profile(RAISE_ID,EquipmentType.DUMBBELL,camera(RAISE_ID,2,ViewClass.FRONT,setOf(ViewClass.FRONT,ViewClass.FRONT_OBLIQUE),req),sig,primitive(RAISE_ID,MovementPrimitive.RAISE))
+        val p=profile(
+            RAISE_ID,
+            EquipmentType.DUMBBELL,
+            camera(RAISE_ID,2,ViewClass.FRONT,setOf(ViewClass.FRONT,ViewClass.FRONT_OBLIQUE),req),
+            lateralRaiseSignals(),
+            primitive(RAISE_ID,MovementPrimitive.RAISE),
+            metricProfile=lateralRaiseMetrics(),
+            formRuleSet=lateralRaiseRules(),
+            version=3,
+        )
         ExerciseBundle(ExerciseDefinition(RAISE_ID,1,"$RAISE_ID-def-v1","Dumbbell Lateral Raise",setOf("lateral raise","db lateral raise"),MovementFamily.RAISE),p,dumbbellGeneric)
     }
     val all by lazy{listOf(inclineDumbbellPress,smithMachineSquat,dumbbellLateralRaise)}
