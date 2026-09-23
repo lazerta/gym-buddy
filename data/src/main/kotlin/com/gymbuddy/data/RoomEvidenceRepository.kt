@@ -45,12 +45,14 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
             RepEvidence(r.repId,r.repOrdinal,r.stepId,MovementPrimitive.valueOf(r.primitive),r.startedAtUs,r.completedAtUs,RepClassification.valueOf(r.classification),sig,met,ctx.toAnalysisProvenance())
         }
         val obs=dao.observationsForSet(setId).map{FormObservation(it.observationId,it.repId,it.ruleId,it.ruleVersion,FormObservationState.valueOf(it.state),FormRuleSeverity.valueOf(it.severity),it.confidence,it.evidenceValue)}
-        val cues=dao.cuesForSet(setId).map{CueEvent(it.cueId,it.ruleId,it.repId,it.emittedAtUs,it.severity)}
+        val cueRows=dao.cuesForSet(setId)
+        val cues=cueRows.map{CueEvent(it.cueId,it.ruleId,it.repId,it.emittedAtUs,it.severity)}
+        val cueObservationIds=cueRows.associate{it.cueId to it.observationId}
         val responses=dao.responsesForSet(setId).map{CueResponse(it.cueId,it.repId,if(it.state=="PERSISTED")CueResponseState.UNCHANGED else CueResponseState.valueOf(it.state))}
         val deliveries=dao.deliveriesForSet(setId).map{CueDeliveryRecord(it.cueId,CueDeliveryState.valueOf(it.state))}
         val tr=dao.trackingSummary(setId)?.let{TrackingQualitySummary(it.setId,it.observableFrames,it.degradedFrames,it.pausedFrames,it.unknownFrames)}
         val sum=dao.setSummary(setId)?.let{SetSummary(it.setId,it.endedAtUs,it.completedReps,it.assistedReps,it.uncertainReps)}
-        return PersistedSetEvidence(SetRecord(s.setId,s.executionId,s.setOrdinal,s.startedAtUs,loadSnapshot(s.actualLoadValue,s.actualLoadUnit)),ctx.toAnalysisProvenance(),reps,obs,cues,responses,tr,sum,deliveries)
+        return PersistedSetEvidence(SetRecord(s.setId,s.executionId,s.setOrdinal,s.startedAtUs,loadSnapshot(s.actualLoadValue,s.actualLoadUnit)),ctx.toAnalysisProvenance(),reps,obs,cues,responses,tr,sum,deliveries,cueObservationIds)
     }
 
     private fun loadSnapshot(value:Double?,unit:String?):LoadSnapshot?{require(value!=null||unit==null);return value?.let{LoadSnapshot(it,unit)}}
