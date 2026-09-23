@@ -55,7 +55,7 @@ class MovementInterpretationEngine(
         val completed = repEvents.filter { it.kind == RepCompletionKind.COMPLETED }
         completed.forEach { event ->
             val rep = evidenceBuilder.build(event, snapshot, config)
-            val obs = formEngine.analyze(rep, config.exerciseProfile.formRuleSet)
+            val obs = formEngine.analyze(rep, config)
             val cueDecision = cueEngine.evaluate(rep, obs)
             evidence += rep
             forms += obs
