@@ -12,6 +12,11 @@ import com.gymbuddy.domain.movement.RepClassification
 import com.gymbuddy.domain.profile.MovementPrimitive
 import com.gymbuddy.domain.persistence.*
 import com.gymbuddy.domain.profile.AnalysisConfigResolver
+import com.gymbuddy.domain.profile.BaselineStatistic
+import com.gymbuddy.domain.profile.ExerciseBaseline
+import com.gymbuddy.domain.profile.ExerciseBaselineKey
+import com.gymbuddy.domain.profile.PersonalCalibrationProfile
+import com.gymbuddy.domain.profile.PersonalCalibrationVersionRef
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
 import org.junit.Assert.*
 import org.junit.Test
@@ -148,6 +153,105 @@ class RoomEvidenceRepositoryTest {
             val persistedSet=RoomEvidenceRepository(secondDb.evidenceDao()).loadSet("set-load")!!
             assertEquals(40.0,persistedSet.set.actualLoad!!.value,0.0)
         } finally { secondDb.close() }
+        context.deleteDatabase(name)
+    }
+
+
+    @Test fun personalCalibrationProvenanceSurvivesReopenAndCannotRebindHistoricalSet() {
+        val name="gym-calibration-${UUID.randomUUID()}.db"
+        context.deleteDatabase(name)
+        val bundle=InitialExerciseProfiles.inclineDumbbellPress
+        val equipment=requireNotNull(bundle.equipment)
+        val baselineV1=ExerciseBaseline(
+            profileId="press-personal-baseline",
+            profileVersion=1,
+            semanticHash="press-personal-baseline-v1",
+            key=ExerciseBaselineKey(
+                exerciseProfileId=bundle.profile.profileId,
+                exerciseProfileVersion=bundle.profile.profileVersion,
+                equipmentProfileId=equipment.profileId,
+                viewClass=bundle.profile.cameraProfile.preferredViewClass,
+            ),
+            metricStatistics=mapOf(
+                "left_rom" to BaselineStatistic(.80,.72,.88,24,3,.80),
+            ),
+        )
+        val baselineV2=baselineV1.copy(
+            metricStatistics=mapOf(
+                "left_rom" to BaselineStatistic(.84,.76,.91,40,5,.92),
+            ),
+        )
+        val calibrationV1=PersonalCalibrationProfile.create(
+            calibrationProfileId="personal-calibration",
+            profileVersion=1,
+            sourceConfidence=.80,
+            normalizedBodyGeometry=mapOf("arm_to_torso" to 1.08),
+            exerciseBaselines=listOf(baselineV1),
+            equipmentAssociations=setOf(equipment.profileId),
+            evidenceReferences=setOf("bootstrap-set"),
+        )
+        val calibrationV2=PersonalCalibrationProfile.create(
+            calibrationProfileId="personal-calibration",
+            profileVersion=2,
+            sourceConfidence=.92,
+            normalizedBodyGeometry=mapOf("arm_to_torso" to 1.08),
+            exerciseBaselines=listOf(baselineV2),
+            equipmentAssociations=setOf(equipment.profileId),
+            evidenceReferences=setOf("bootstrap-set","later-set"),
+        )
+        assertNotEquals(calibrationV1.semanticHash,calibrationV2.semanticHash)
+
+        val configV1=AnalysisConfigResolver.resolve(
+            bundle.definition,bundle.profile,equipment,calibrationV1
+        )
+        val configV2=AnalysisConfigResolver.resolve(
+            bundle.definition,bundle.profile,equipment,calibrationV2
+        )
+        val setV1=SetRecord("set-cal-v1","exec-cal",1,200)
+        val setV2=SetRecord("set-cal-v2","exec-cal",2,400)
+
+        val firstDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name)
+            .addMigrations(*GymBuddyMigrations.ALL)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val repo=RoomEvidenceRepository(firstDb.evidenceDao())
+            repo.ensureSession(WorkoutSessionRecord("session-cal",100))
+            repo.ensureExecution(
+                ExerciseExecutionRecord(
+                    "exec-cal","session-cal",bundle.definition.exerciseId,100
+                )
+            )
+            repo.openSet(setV1,configV1)
+            repo.openSet(setV2,configV2)
+            assertThrows(IllegalArgumentException::class.java) {
+                repo.openSet(setV1,configV2)
+            }
+        } finally {
+            firstDb.close()
+        }
+
+        val secondDb=Room.databaseBuilder(context,GymBuddyDatabase::class.java,name)
+            .addMigrations(*GymBuddyMigrations.ALL)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val repo=RoomEvidenceRepository(secondDb.evidenceDao())
+            val loadedV1=requireNotNull(repo.loadSet(setV1.setId))
+            val loadedV2=requireNotNull(repo.loadSet(setV2.setId))
+            assertEquals(
+                PersonalCalibrationVersionRef.from(calibrationV1),
+                loadedV1.analysisProvenance.personalCalibrationProfile,
+            )
+            assertEquals(
+                PersonalCalibrationVersionRef.from(calibrationV2),
+                loadedV2.analysisProvenance.personalCalibrationProfile,
+            )
+            assertEquals(configV1.provenance,loadedV1.analysisProvenance)
+            assertEquals(configV2.provenance,loadedV2.analysisProvenance)
+        } finally {
+            secondDb.close()
+        }
         context.deleteDatabase(name)
     }
 

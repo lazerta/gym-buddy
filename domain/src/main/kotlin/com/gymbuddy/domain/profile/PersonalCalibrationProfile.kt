@@ -91,6 +91,48 @@ data class PersonalCalibrationProfile(
         require(evidenceReferences.none { it.isBlank() }) {
             "evidenceReferences must not contain blank values"
         }
+        require(exerciseBaselines.map { it.key }.distinct().size == exerciseBaselines.size) {
+            "exerciseBaselines must not contain duplicate keys"
+        }
+    }
+
+    companion object {
+        fun create(
+            calibrationProfileId: String,
+            profileVersion: Int,
+            sourceConfidence: Double,
+            normalizedBodyGeometry: Map<String, Double?> = emptyMap(),
+            cameraSetupPreferences: Map<String, Double?> = emptyMap(),
+            exerciseBaselines: List<ExerciseBaseline> = emptyList(),
+            equipmentAssociations: Set<String> = emptySet(),
+            lateralityBaseline: Map<String, Double?> = emptyMap(),
+            cueEffectiveness: Map<String, Double?> = emptyMap(),
+            evidenceReferences: Set<String> = emptySet(),
+        ): PersonalCalibrationProfile {
+            val semanticHash = PersonalCalibrationSemanticHash.compute(
+                sourceConfidence = sourceConfidence,
+                normalizedBodyGeometry = normalizedBodyGeometry,
+                cameraSetupPreferences = cameraSetupPreferences,
+                exerciseBaselines = exerciseBaselines,
+                equipmentAssociations = equipmentAssociations,
+                lateralityBaseline = lateralityBaseline,
+                cueEffectiveness = cueEffectiveness,
+                evidenceReferences = evidenceReferences,
+            )
+            return PersonalCalibrationProfile(
+                calibrationProfileId = calibrationProfileId,
+                profileVersion = profileVersion,
+                semanticHash = semanticHash,
+                sourceConfidence = sourceConfidence,
+                normalizedBodyGeometry = normalizedBodyGeometry,
+                cameraSetupPreferences = cameraSetupPreferences,
+                exerciseBaselines = exerciseBaselines,
+                equipmentAssociations = equipmentAssociations,
+                lateralityBaseline = lateralityBaseline,
+                cueEffectiveness = cueEffectiveness,
+                evidenceReferences = evidenceReferences,
+            )
+        }
     }
 
     private fun validateOptionalMap(values: Map<String, Double?>, field: String) {
