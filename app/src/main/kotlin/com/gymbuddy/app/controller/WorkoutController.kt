@@ -37,6 +37,7 @@ class WorkoutController(
     private var restCheckpoint:RestCheckpoint?=null
     private var newExerciseStarted=false
     private var endingSet=false
+    private var lastCompletedSetId:String?=null
     private var selectedDay=runCatching{
         WorkoutDay.valueOf(savedStateHandle.get<String>(KEY_DAY)?:WorkoutDay.PUSH.name)
     }.getOrDefault(WorkoutDay.PUSH)
@@ -77,6 +78,7 @@ class WorkoutController(
         currentRepCount=0
         latestCue=null
         endingSet=false
+        lastCompletedSetId=null
         completedSets.clear()
         runtime.beginExercise(bundle.definition.exerciseId)
         runtime.beginSet(setNumber,actualLoad)
@@ -129,6 +131,7 @@ class WorkoutController(
             restStartedAtEpochMs=restStarted,
         )
         restCheckpoint=checkpoint
+        lastCompletedSetId=context.set.setId
         completedSets+=CompletedSetUiState(
             setNumber=context.set.setOrdinal,
             reps=currentRepCount,
@@ -201,6 +204,20 @@ class WorkoutController(
     }
 
     @Synchronized
+    fun askChatGpt(onResult:(Result<String>)->Unit){
+        if(_uiState.value !is WorkoutUiState.Summary){
+            onResult(Result.failure(IllegalStateException("Ask ChatGPT is only available from summary")))
+            return
+        }
+        val setId=lastCompletedSetId
+        if(setId==null){
+            onResult(Result.failure(IllegalStateException("No completed set is available to export")))
+            return
+        }
+        runtime.exportChatGptContext(setId,onResult)
+    }
+
+    @Synchronized
     fun returnToSelection(){
         selectedExerciseId=null
         currentRepCount=0
@@ -208,6 +225,7 @@ class WorkoutController(
         actualLoad=null
         restCheckpoint=null
         endingSet=false
+        lastCompletedSetId=null
         completedSets.clear()
         runtime.clearRestCheckpoint()
         _uiState.value=selectionState()
@@ -256,6 +274,7 @@ class WorkoutController(
         currentRepCount=checkpoint.previousReps
         latestCue=checkpoint.focus.takeUnless{it=="Repeat the same setup."}
         restCheckpoint=checkpoint
+        lastCompletedSetId=checkpoint.completedSet.setId
         completedSets.clear()
         completedSets+=CompletedSetUiState(
             setNumber=checkpoint.completedSet.setOrdinal,

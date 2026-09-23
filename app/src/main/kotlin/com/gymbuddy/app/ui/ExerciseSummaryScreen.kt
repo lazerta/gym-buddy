@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.Button
 import androidx.compose.material.Card
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.OutlinedButton
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -17,6 +18,7 @@ import com.gymbuddy.app.controller.WorkoutUiState
 @Composable
 fun ExerciseSummaryScreen(
     state:WorkoutUiState.Summary,
+    onAskChatGpt:()->Unit,
     onReturnToExercises:()->Unit,
 ){
     Column(
@@ -33,6 +35,10 @@ fun ExerciseSummaryScreen(
             }
         }
         Text(state.evidenceSummary,style=MaterialTheme.typography.h6)
+        OutlinedButton(
+            modifier=Modifier.fillMaxWidth(),
+            onClick=onAskChatGpt,
+        ){Text("Ask ChatGPT")}
         Button(
             modifier=Modifier.fillMaxWidth(),
             onClick=onReturnToExercises,

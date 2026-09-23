@@ -30,6 +30,7 @@ data class PersistedSetEvidence(
     val tracking:TrackingQualitySummary?,
     val summary:SetSummary?,
     val cueDeliveries:List<CueDeliveryRecord> = emptyList(),
+    val cueObservationIds:Map<String,String?> = emptyMap(),
 )
 
 interface EvidenceRepository {

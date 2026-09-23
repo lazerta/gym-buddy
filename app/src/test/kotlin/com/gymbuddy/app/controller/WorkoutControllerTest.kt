@@ -129,6 +129,26 @@ class WorkoutControllerTest {
         assertEquals("40 lb",(controller.uiState.value as WorkoutUiState.Rest).previousActualLoadText)
     }
 
+    @Test
+    fun askChatGptExportsMostRecentRestoredSetFromSummary(){
+        val runtime=FakeRuntime(
+            restToLoad=checkpoint(
+                actual=LoadSnapshot(40.0,"lb"),
+                planned=LoadSnapshot(45.0,"lb"),
+                restStartedAt=123_000L,
+                reps=8,
+            )
+        )
+        val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{999_000L})
+        controller.finishExercise()
+
+        var exported:String?=null
+        controller.askChatGpt{result->exported=result.getOrThrow()}
+
+        assertEquals("set",runtime.exportedSetId)
+        assertEquals("export:set",exported)
+    }
+
     private fun checkpoint(
         actual:LoadSnapshot?,
         planned:LoadSnapshot?,
@@ -152,6 +172,7 @@ class WorkoutControllerTest {
         val savedRest=mutableListOf<RestCheckpointDraft>()
         var endedSets=0
         var resumedExecutionId:String?=null
+        var exportedSetId:String?=null
         private var currentExercise="incline_dumbbell_press"
         private var currentSetOrdinal=1
         private var currentLoad:LoadSnapshot?=null
@@ -200,6 +221,15 @@ class WorkoutControllerTest {
         }
 
         override fun clearRestCheckpoint()=Unit
+
+        override fun exportChatGptContext(
+            currentSetId:String,
+            onResult:(Result<String>)->Unit,
+        ){
+            exportedSetId=currentSetId
+            onResult(Result.success("export:"+currentSetId))
+        }
+
         override fun close()=Unit
     }
 }
