@@ -51,6 +51,12 @@ jobs:
           --harness-root harness-src
           --output build/harness-contracts/primary-subject-lock-contracts.tsv
 
+      - name: Generate harness form/cue contracts
+        run: >-
+          python tools/generate_harness_form_cue_contracts.py
+          --harness-root harness-src
+          --output build/harness-contracts/form-cue-contracts.tsv
+
       - name: Prepare deterministic frame session
         shell: bash
         run: |
@@ -159,6 +165,14 @@ jobs:
         run: >-
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.HarnessPrimarySubjectLockContractTest
+          --stacktrace
+
+      - name: Harness-derived form/cue contract gate
+        env:
+          GYM_BUDDY_HARNESS_FORM_CUE_FIXTURE: ${{ github.workspace }}/build/harness-contracts/form-cue-contracts.tsv
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.integration.HarnessFormCueContractTest
           --stacktrace
 
       - name: Production movement vertical-slice gate
