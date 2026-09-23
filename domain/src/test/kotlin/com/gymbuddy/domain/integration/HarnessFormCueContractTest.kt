@@ -5,7 +5,6 @@ import com.gymbuddy.domain.coaching.CueResponseState
 import com.gymbuddy.domain.evidence.FormAnalysisEngine
 import com.gymbuddy.domain.evidence.RepEvidence
 import com.gymbuddy.domain.evidence.SignalEvidence
-import com.gymbuddy.domain.movement.MovementPrimitive
 import com.gymbuddy.domain.movement.RepClassification
 import com.gymbuddy.domain.profile.*
 import org.junit.Assert.assertEquals
