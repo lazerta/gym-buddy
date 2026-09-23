@@ -3,6 +3,7 @@ package com.gymbuddy.app
 object CueTextCatalog {
     fun text(ruleId:String):String = when(ruleId){
         "bilateral_asymmetry" -> "Keep both sides moving together."
+        "press_elbow_path_flare" -> "Keep your elbows slightly closer in."
         else -> "Adjust your form."
     }
 }
