@@ -24,6 +24,34 @@ object InitialExerciseProfiles {
             SignalDefinition("right_progress",SignalKind.JOINT_ANGLE,SignalUnit.NORMALIZED,right.toSet(),mapOf("scale" to scale,"offset" to offset,"min_signal_confidence" to .50),right),
         )
     )
+    private fun inclinePressSignals()=SignalProfile(
+        "$PRESS_ID-signals",3,"$PRESS_ID-signals-v3",listOf(
+            SignalDefinition(
+                "left_progress",SignalKind.JOINT_ANGLE,SignalUnit.NORMALIZED,
+                setOf("left_shoulder","left_elbow","left_wrist"),
+                mapOf("scale" to -1.0/90.0,"offset" to 160.0/90.0,"min_signal_confidence" to .50),
+                listOf("left_shoulder","left_elbow","left_wrist"),
+            ),
+            SignalDefinition(
+                "right_progress",SignalKind.JOINT_ANGLE,SignalUnit.NORMALIZED,
+                setOf("right_shoulder","right_elbow","right_wrist"),
+                mapOf("scale" to -1.0/90.0,"offset" to 160.0/90.0,"min_signal_confidence" to .50),
+                listOf("right_shoulder","right_elbow","right_wrist"),
+            ),
+            SignalDefinition(
+                "left_elbow_path_angle",SignalKind.JOINT_ANGLE,SignalUnit.DEGREES,
+                setOf("left_hip","left_shoulder","left_elbow"),
+                mapOf("min_signal_confidence" to .50),
+                listOf("left_hip","left_shoulder","left_elbow"),
+            ),
+            SignalDefinition(
+                "right_elbow_path_angle",SignalKind.JOINT_ANGLE,SignalUnit.DEGREES,
+                setOf("right_hip","right_shoulder","right_elbow"),
+                mapOf("min_signal_confidence" to .50),
+                listOf("right_hip","right_shoulder","right_elbow"),
+            ),
+        )
+    )
     private fun primitive(id:String,p:MovementPrimitive)=MovementPrimitiveSequence(
         "$id-primitive",2,"$id-primitive-v2",listOf(MovementPrimitiveStep("cycle",p,listOf("left_progress","right_progress"),mapOf(
             "start_max" to .20,"end_min" to .80,"stable_start_us" to 100_000.0,"pause_velocity_threshold" to .025,
@@ -36,18 +64,46 @@ object InitialExerciseProfiles {
         MetricDefinition("bilateral_asymmetry",setOf("left_progress","right_progress"),SignalUnit.NORMALIZED,MetricAggregation.ABS_DIFFERENCE),
         MetricDefinition("bilateral_timing_ms",setOf("left_progress","right_progress"),SignalUnit.MILLISECONDS,MetricAggregation.CROSSING_TIME_DIFFERENCE,mapOf("threshold" to .80)),
     ))
+    private fun inclinePressMetrics()=MetricProfile("$PRESS_ID-metrics",3,"$PRESS_ID-metrics-v3",listOf(
+        MetricDefinition("left_rom",setOf("left_progress"),SignalUnit.NORMALIZED,MetricAggregation.RANGE),
+        MetricDefinition("right_rom",setOf("right_progress"),SignalUnit.NORMALIZED,MetricAggregation.RANGE),
+        MetricDefinition("bilateral_asymmetry",setOf("left_progress","right_progress"),SignalUnit.NORMALIZED,MetricAggregation.ABS_DIFFERENCE),
+        MetricDefinition("bilateral_timing_ms",setOf("left_progress","right_progress"),SignalUnit.MILLISECONDS,MetricAggregation.CROSSING_TIME_DIFFERENCE,mapOf("threshold" to .80)),
+        MetricDefinition("press_elbow_path_flare_deg",setOf("left_elbow_path_angle","right_elbow_path_angle"),SignalUnit.DEGREES,MetricAggregation.MAX),
+    ))
     private fun rules(id:String)=FormRuleSet("$id-rules",2,"$id-rules-v2",listOf(
         FormRule("bilateral_asymmetry",2,setOf("left_progress","right_progress"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_ABS_DIFFERENCE,.18)
     ))
-    private fun profile(id:String,equipment:EquipmentType,camera:CameraProfile,signals:SignalProfile,primitive:MovementPrimitiveSequence)=ExerciseProfile(
-        "$id-profile",2,"$id-profile-v2",id,LateralityMode.BILATERAL,setOf(equipment),camera,signals,primitive,metrics(id),rules(id),cue(id),
+    private fun inclinePressRules()=FormRuleSet("$PRESS_ID-rules",3,"$PRESS_ID-rules-v3",listOf(
+        FormRule("bilateral_asymmetry",2,setOf("left_progress","right_progress"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_ABS_DIFFERENCE,.18),
+        FormRule("press_elbow_path_flare",1,setOf("left_elbow_path_angle","right_elbow_path_angle"),.60,FormRuleSeverity.MINOR,FormComparison.MAX_VALUE,80.0),
+    ))
+    private fun profile(
+        id:String,
+        equipment:EquipmentType,
+        camera:CameraProfile,
+        signals:SignalProfile,
+        primitive:MovementPrimitiveSequence,
+        metricProfile:MetricProfile=metrics(id),
+        formRuleSet:FormRuleSet=rules(id),
+        version:Int=2,
+    )=ExerciseProfile(
+        "$id-profile",version,"$id-profile-v$version",id,LateralityMode.BILATERAL,setOf(equipment),camera,signals,primitive,metricProfile,formRuleSet,cue(id),
         setOf(ProfileCapability.CAMERA_GUIDANCE,ProfileCapability.REP_DETECTION,ProfileCapability.FORM_ANALYSIS,ProfileCapability.BILATERAL_TIMING)
     )
 
     val inclineDumbbellPress:ExerciseBundle by lazy{
         val req=setOf("left_shoulder","right_shoulder","left_elbow","right_elbow","left_wrist","right_wrist","left_hip","right_hip")
-        val sig=bilateralSignals(PRESS_ID,listOf("left_shoulder","left_elbow","left_wrist"),listOf("right_shoulder","right_elbow","right_wrist"),-1.0/90.0,160.0/90.0)
-        val p=profile(PRESS_ID,EquipmentType.DUMBBELL,camera(PRESS_ID,2,ViewClass.SIDE_OBLIQUE,setOf(ViewClass.SIDE_OBLIQUE,ViewClass.SIDE),req),sig,primitive(PRESS_ID,MovementPrimitive.PRESS))
+        val p=profile(
+            PRESS_ID,
+            EquipmentType.DUMBBELL,
+            camera(PRESS_ID,2,ViewClass.SIDE_OBLIQUE,setOf(ViewClass.SIDE_OBLIQUE,ViewClass.SIDE),req),
+            inclinePressSignals(),
+            primitive(PRESS_ID,MovementPrimitive.PRESS),
+            metricProfile=inclinePressMetrics(),
+            formRuleSet=inclinePressRules(),
+            version=3,
+        )
         ExerciseBundle(ExerciseDefinition(PRESS_ID,1,"$PRESS_ID-def-v1","Incline Dumbbell Press",setOf("incline db press","incline dumbbell bench press"),MovementFamily.PRESS),p,dumbbellGeneric)
     }
     val smithMachineSquat:ExerciseBundle by lazy{
