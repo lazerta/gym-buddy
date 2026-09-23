@@ -129,10 +129,9 @@ class InclineDumbbellPressT19Test {
             600_000,
             pose(90.0,90.0,missing=setOf(PoseLandmarkId.RIGHT_WRIST)),
         )
-        val invalid=assertNotNull(
-            occluded.repEvents.singleOrNull{it.kind==RepCompletionKind.INVALID_ATTEMPT}
-        )!!
-        assertEquals(RepInvalidReason.INTERRUPTED,invalid.invalidReason)
+        val invalid=occluded.repEvents.singleOrNull{it.kind==RepCompletionKind.INVALID_ATTEMPT}
+        assertNotNull(invalid)
+        assertEquals(RepInvalidReason.INTERRUPTED,invalid!!.invalidReason)
         assertTrue(occluded.repEvidence.isEmpty())
 
         val recovered=completeRep(engine,1_000_000,60.0)
