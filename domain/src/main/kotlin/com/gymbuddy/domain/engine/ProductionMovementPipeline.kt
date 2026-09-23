@@ -2,6 +2,7 @@ package com.gymbuddy.domain.engine
 
 import com.gymbuddy.domain.camera.CameraGuidanceEngine
 import com.gymbuddy.domain.camera.PoseViewEstimator
+import com.gymbuddy.domain.camera.PersonalCameraPriorCodec
 import com.gymbuddy.domain.lifecycle.SetLifecycleController
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
 import com.gymbuddy.domain.movement.*
@@ -62,7 +63,13 @@ class ProductionMovementPipeline(
         } else context
 
         val priorLifecycle = lifecycle.state
-        val guidance = cameraGuidanceEngine.evaluate(frame,lock,config.exerciseProfile.cameraProfile,effectiveContext)
+        val guidance = cameraGuidanceEngine.evaluate(
+            frame,
+            lock,
+            config.exerciseProfile.cameraProfile,
+            effectiveContext,
+            PersonalCameraPriorCodec.resolve(config),
+        )
         val lifecycleAfterGuidance = lifecycle.onCameraGuidance(guidance)
         if (priorLifecycle != SetLifecycleState.CAMERA_GUIDANCE && lifecycleAfterGuidance == SetLifecycleState.CAMERA_GUIDANCE && priorLifecycle != SetLifecycleState.ACTIVE_SET) {
             engine.reset()
@@ -74,6 +81,24 @@ class ProductionMovementPipeline(
         }
 
         val tracking = trackingGate.evaluate(frame,lock,config.exerciseProfile.cameraProfile,effectiveContext)
+        if (tracking.reason == TrackingQualityReason.CAMERA_DISTURBANCE ||
+            tracking.reason == TrackingQualityReason.WRONG_VIEW
+        ) {
+            val priorState = lifecycle.state
+            val invalidated = lifecycle.invalidateCameraSetup()
+            if (priorState != SetLifecycleState.CAMERA_GUIDANCE &&
+                invalidated == SetLifecycleState.CAMERA_GUIDANCE
+            ) {
+                cameraGuidanceEngine.reset()
+                return result(
+                    frame.timestampUs,
+                    lock,
+                    tracking,
+                    interruptOnce(frame.timestampUs),
+                    guidance,
+                )
+            }
+        }
         if (!tracking.allowsBiomechanics) {
             return result(frame.timestampUs,lock,tracking,interruptOnce(frame.timestampUs),guidance)
         }
