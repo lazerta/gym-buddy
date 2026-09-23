@@ -1,6 +1,5 @@
 package com.gymbuddy.app.controller
 
-import androidx.lifecycle.SavedStateHandle
 import com.google.mediapipe.framework.image.MPImage
 import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
@@ -21,10 +20,23 @@ import org.junit.Test
 import java.util.concurrent.Executor
 
 class WorkoutControllerTest {
+
+    @Test
+    fun controllerIsPlainMvcControllerNotAndroidxViewModel(){
+        assertEquals(Any::class.java,WorkoutController::class.java.superclass)
+    }
+
+    @Test
+    fun selectedDayIsExplicitControllerStateForActivityRestoration(){
+        val controller=WorkoutController(FakeRuntime(),WorkoutDay.LEGS,WorkoutClock{1_000L})
+        assertEquals(WorkoutDay.LEGS,controller.currentDay)
+        controller.selectDay(WorkoutDay.PUSH)
+        assertEquals(WorkoutDay.PUSH,controller.currentDay)
+    }
     @Test
     fun exerciseSelectionMovesDirectlyToCameraSetup(){
         val runtime=FakeRuntime()
-        val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{1_000L})
+        val controller=WorkoutController(runtime,WorkoutDay.PUSH,WorkoutClock{1_000L})
 
         controller.selectExercise("incline_dumbbell_press")
 
@@ -36,7 +48,7 @@ class WorkoutControllerTest {
 
     @Test
     fun readyRemainsSetupAndValidMovementTransitionsToActiveSet(){
-        val controller=WorkoutController(FakeRuntime(),SavedStateHandle(),WorkoutClock{1_000L})
+        val controller=WorkoutController(FakeRuntime(),WorkoutDay.PUSH,WorkoutClock{1_000L})
         controller.selectExercise("smith_machine_squat")
 
         controller.onRuntimeSnapshot(
@@ -68,7 +80,7 @@ class WorkoutControllerTest {
     @Test
     fun endSetEntersRestAndNextSetSnapshotsEditedPlannedLoad(){
         val runtime=FakeRuntime()
-        val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{5_000L})
+        val controller=WorkoutController(runtime,WorkoutDay.PUSH,WorkoutClock{5_000L})
         controller.selectExercise("dumbbell_lateral_raise")
         controller.onRuntimeSnapshot(
             WorkoutRuntimeSnapshot(
@@ -112,7 +124,7 @@ class WorkoutControllerTest {
             reps=8,
         )
         val runtime=FakeRuntime(restToLoad=checkpoint)
-        val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{999_000L})
+        val controller=WorkoutController(runtime,WorkoutDay.PUSH,WorkoutClock{999_000L})
 
         val rest=controller.uiState.value as WorkoutUiState.Rest
         assertEquals(123_000L,rest.restStartedAtEpochMs)
@@ -139,7 +151,7 @@ class WorkoutControllerTest {
                 reps=8,
             )
         )
-        val controller=WorkoutController(runtime,SavedStateHandle(),WorkoutClock{999_000L})
+        val controller=WorkoutController(runtime,WorkoutDay.PUSH,WorkoutClock{999_000L})
         controller.finishExercise()
 
         var exported:String?=null
