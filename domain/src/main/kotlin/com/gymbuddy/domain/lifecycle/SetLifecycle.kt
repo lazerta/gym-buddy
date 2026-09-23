@@ -12,6 +12,13 @@ class SetLifecycleController {
 
     fun reset() { state = SetLifecycleState.CAMERA_GUIDANCE }
 
+    fun invalidateCameraSetup(): SetLifecycleState {
+        if (state != SetLifecycleState.FINALIZING && state != SetLifecycleState.ENDED) {
+            state = SetLifecycleState.CAMERA_GUIDANCE
+        }
+        return state
+    }
+
     fun onCameraGuidance(action: CameraGuidanceAction): SetLifecycleState {
         if (state in setOf(SetLifecycleState.ACTIVE_SET, SetLifecycleState.POSSIBLE_END, SetLifecycleState.FINALIZING, SetLifecycleState.ENDED)) {
             return state
