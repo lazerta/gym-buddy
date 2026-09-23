@@ -1,7 +1,5 @@
 package com.gymbuddy.app.controller
 
-import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.ViewModel
 import com.google.mediapipe.framework.image.MPImage
 import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
@@ -25,9 +23,9 @@ object SystemWorkoutClock:WorkoutClock { override fun nowEpochMs():Long=System.c
 
 class WorkoutController(
     private val runtime:WorkoutRuntimeGateway,
-    private val savedStateHandle:SavedStateHandle,
+    initialDay:WorkoutDay=WorkoutDay.PUSH,
     private val clock:WorkoutClock=SystemWorkoutClock,
-):ViewModel(){
+){
     private val completedSets=mutableListOf<CompletedSetUiState>()
     private var selectedExerciseId:String?=null
     private var setNumber=1
@@ -38,9 +36,9 @@ class WorkoutController(
     private var newExerciseStarted=false
     private var endingSet=false
     private var lastCompletedSetId:String?=null
-    private var selectedDay=runCatching{
-        WorkoutDay.valueOf(savedStateHandle.get<String>(KEY_DAY)?:WorkoutDay.PUSH.name)
-    }.getOrDefault(WorkoutDay.PUSH)
+    private var selectedDay=initialDay
+    val currentDay:WorkoutDay
+        @Synchronized get()=selectedDay
 
     private val _uiState=MutableStateFlow<WorkoutUiState>(selectionState())
     val uiState:StateFlow<WorkoutUiState> = _uiState.asStateFlow()
@@ -59,7 +57,6 @@ class WorkoutController(
     @Synchronized
     fun selectDay(day:WorkoutDay){
         selectedDay=day
-        savedStateHandle[KEY_DAY]=day.name
         if(_uiState.value is WorkoutUiState.ExerciseSelection){
             _uiState.value=selectionState()
         }
@@ -294,10 +291,7 @@ class WorkoutController(
         )
     }
 
-    override fun onCleared(){
-        runtime.close()
-        super.onCleared()
-    }
+    fun close(){runtime.close()}
 
     private fun selectionState()=WorkoutUiState.ExerciseSelection(
         selectedDay=selectedDay,
@@ -357,7 +351,4 @@ class WorkoutController(
         TrackingQualityState.PAUSED,TrackingQualityState.UNKNOWN->"Tracking paused"
     }
 
-    companion object {
-        private const val KEY_DAY="selected_day"
-    }
 }
