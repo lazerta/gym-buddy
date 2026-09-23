@@ -10,15 +10,28 @@ import com.gymbuddy.domain.profile.MetricProfile
 import kotlin.math.max
 import kotlin.math.min
 
+const val PERSONAL_MOVEMENT_BASELINE_POLICY_VERSION = 2
+
 data class PersonalMovementBaselinePolicy(
+    val version: Int = PERSONAL_MOVEMENT_BASELINE_POLICY_VERSION,
     val minimumSessionCount: Int = 3,
     val minimumMetricConfidence: Double = .50,
     val minimumProfileConfidence: Double = .50,
+    // A personal boundary may extend beyond the generic boundary by no more than
+    // this fraction of the baseline median's headroom on the generic acceptable side.
+    // This is dimensionless, so it behaves consistently for normalized ROM, degrees,
+    // milliseconds, and other supported metric units.
+    val maximumBoundaryRelaxationHeadroomFactor: Double = 1.0,
 ) {
     init {
+        require(version > 0)
         require(minimumSessionCount >= 2)
         require(minimumMetricConfidence.isFinite() && minimumMetricConfidence in 0.0..1.0)
         require(minimumProfileConfidence.isFinite() && minimumProfileConfidence in 0.0..1.0)
+        require(
+            maximumBoundaryRelaxationHeadroomFactor.isFinite() &&
+                maximumBoundaryRelaxationHeadroomFactor in 0.0..1.0
+        )
     }
 }
 
@@ -58,20 +71,49 @@ class PersonalMovementBaselineResolver(
 
         val center = statistic.median ?: return generic
         return when (rule.comparison) {
-            FormComparison.MIN_VALUE -> {
-                // Personalization may only relax the lower threshold when the baseline center
-                // itself remains on the generic acceptable side. This prevents a repeatedly
-                // bad baseline from becoming the new definition of "good" form.
-                if (center < generic) generic
-                else statistic.lowerBound?.let { min(generic, it) } ?: generic
-            }
+            FormComparison.MIN_VALUE -> boundedLowerThreshold(
+                generic = generic,
+                center = center,
+                personalLowerBound = statistic.lowerBound,
+            )
             FormComparison.MAX_VALUE,
             FormComparison.MAX_ABS_DIFFERENCE,
-            FormComparison.RANGE_AT_MOST -> {
-                if (center > generic) generic
-                else statistic.upperBound?.let { max(generic, it) } ?: generic
-            }
+            FormComparison.RANGE_AT_MOST -> boundedUpperThreshold(
+                generic = generic,
+                center = center,
+                personalUpperBound = statistic.upperBound,
+            )
         }
+    }
+
+    private fun boundedLowerThreshold(
+        generic: Double,
+        center: Double,
+        personalLowerBound: Double?,
+    ): Double {
+        // A baseline centered on the violating side must never redefine bad form as normal.
+        if (center < generic) return generic
+        val lower = personalLowerBound ?: return generic
+        val requested = min(generic, lower)
+        val acceptableHeadroom = center - generic
+        val minimumAllowed =
+            generic - acceptableHeadroom * policy.maximumBoundaryRelaxationHeadroomFactor
+        return max(requested, minimumAllowed)
+    }
+
+    private fun boundedUpperThreshold(
+        generic: Double,
+        center: Double,
+        personalUpperBound: Double?,
+    ): Double {
+        // A baseline centered on the violating side must never redefine bad form as normal.
+        if (center > generic) return generic
+        val upper = personalUpperBound ?: return generic
+        val requested = max(generic, upper)
+        val acceptableHeadroom = generic - center
+        val maximumAllowed =
+            generic + acceptableHeadroom * policy.maximumBoundaryRelaxationHeadroomFactor
+        return min(requested, maximumAllowed)
     }
 
     private fun matchingMetric(rule: FormRule, metricProfile: MetricProfile): MetricDefinition? {
