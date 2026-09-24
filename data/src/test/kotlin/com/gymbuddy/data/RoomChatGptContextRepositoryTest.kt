@@ -69,6 +69,70 @@ class RoomChatGptContextRepositoryTest {
         }
     }
 
+    @Test
+    fun recentHistoryUsesWallClockAcrossMonotonicTimebaseReset(){
+        val db=Room.inMemoryDatabaseBuilder(
+            context,GymBuddyDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try{
+            val evidence=RoomEvidenceRepository(db.evidenceDao())
+            addFinalizedSet(
+                evidence,
+                "session-before-reboot",
+                "exec-before-reboot",
+                "before-reboot",
+                1,
+                900_000L,
+                1_000_000L,
+                InitialExerciseProfiles.inclineDumbbellPress,
+                sessionStartedEpochMs=10_000L,
+                setStartedEpochMs=10_100L,
+                endedAtEpochMs=10_200L,
+            )
+            addFinalizedSet(
+                evidence,
+                "session-current",
+                "exec-current",
+                "current-after-reboot",
+                1,
+                900L,
+                1_000L,
+                InitialExerciseProfiles.inclineDumbbellPress,
+                sessionStartedEpochMs=20_000L,
+                setStartedEpochMs=20_100L,
+                endedAtEpochMs=20_200L,
+            )
+            addFinalizedSet(
+                evidence,
+                "session-future",
+                "exec-future",
+                "future-after-reboot",
+                1,
+                100L,
+                200L,
+                InitialExerciseProfiles.inclineDumbbellPress,
+                sessionStartedEpochMs=30_000L,
+                setStartedEpochMs=30_100L,
+                endedAtEpochMs=30_200L,
+            )
+
+            val repository=RoomChatGptContextRepository(db.evidenceDao())
+            val history=repository.loadRecentComparableSetContexts(
+                exerciseId="incline_dumbbell_press",
+                currentSetId="current-after-reboot",
+                beforeEndedAtUs=20_200L,
+                limit=3,
+            )
+
+            assertEquals(
+                listOf("before-reboot"),
+                history.map{it.evidence.set.setId},
+            )
+        }finally{
+            db.close()
+        }
+    }
+
     private fun addFinalizedSet(
         repository:RoomEvidenceRepository,
         sessionId:String,
@@ -78,25 +142,46 @@ class RoomChatGptContextRepositoryTest {
         startedAtUs:Long,
         endedAtUs:Long,
         bundle:ExerciseBundle,
+        sessionStartedEpochMs:Long=0L,
+        setStartedEpochMs:Long=0L,
+        endedAtEpochMs:Long=0L,
     ){
         val config=AnalysisConfigResolver.resolve(
             bundle.definition,
             bundle.profile,
             bundle.equipment,
         )
-        repository.ensureSession(WorkoutSessionRecord(sessionId,startedAtUs-100))
+        repository.ensureSession(
+            WorkoutSessionRecord(
+                sessionId,
+                startedAtUs-100,
+                sessionStartedEpochMs,
+            )
+        )
         repository.ensureExecution(
             ExerciseExecutionRecord(
                 executionId,
                 sessionId,
                 bundle.definition.exerciseId,
                 startedAtUs-50,
+                sessionStartedEpochMs.takeIf{it>0L}?.plus(50L)?:0L,
             )
         )
         repository.openSet(
-            SetRecord(setId,executionId,setOrdinal,startedAtUs),
+            SetRecord(
+                setId,
+                executionId,
+                setOrdinal,
+                startedAtUs,
+                null,
+                setStartedEpochMs,
+            ),
             config,
         )
-        repository.finishSet(SetSummary(setId,endedAtUs,0,0,0))
+        repository.finishSet(
+            SetSummary(
+                setId,endedAtUs,0,0,0,endedAtEpochMs
+            )
+        )
     }
 }
