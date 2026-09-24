@@ -21,6 +21,7 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutFlowState(e:WorkoutFlowStateEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertInterruptedSet(e:InterruptedSetEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertPersonalCalibration(e:PersonalCalibrationProfileEntity)
+    @Insert(onConflict=OnConflictStrategy.IGNORE) abstract fun insertPersonalCalibrationHistory(e:PersonalCalibrationProfileHistoryEntity):Long
 
     @Query("SELECT * FROM workout_sessions WHERE sessionId=:id") abstract fun session(id:String):WorkoutSessionEntity?
     @Query("SELECT * FROM exercise_executions WHERE executionId=:id") abstract fun execution(id:String):ExerciseExecutionEntity?
@@ -104,6 +105,7 @@ import androidx.room.*
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:checkpointId AND completedSetId=:setId") abstract fun deleteWorkoutFlowStateForSet(checkpointId:String,setId:String)
     @Query("SELECT * FROM interrupted_sets WHERE setId=:setId") abstract fun interruptedSet(setId:String):InterruptedSetEntity?
     @Query("SELECT * FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun personalCalibration(slotId:String):PersonalCalibrationProfileEntity?
+    @Query("SELECT * FROM personal_calibration_profile_history WHERE calibrationProfileId=:profileId AND profileVersion=:profileVersion") abstract fun personalCalibrationHistory(profileId:String,profileVersion:Int):PersonalCalibrationProfileHistoryEntity?
     @Query("DELETE FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun deletePersonalCalibration(slotId:String)
 
     @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){insertSet(s);insertAnalysisContext(c)}
