@@ -2,6 +2,7 @@ package com.gymbuddy.app.runtime
 
 import com.google.mediapipe.framework.image.MPImage
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
+import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
@@ -36,6 +37,9 @@ interface WorkoutRuntimeGateway:AutoCloseable {
     fun frameConsumer(listener:(WorkoutRuntimeSnapshot)->Unit):FrameConsumer<MPImage>
     fun saveRestCheckpoint(checkpoint:RestCheckpointDraft)
     fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit)
+    fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit)
+    fun markActiveSetInterrupted(setId:String,recoveredAtEpochMs:Long,committedReps:Int)
     fun clearRestCheckpoint()
+    fun clearPersonalCalibration(onCompleted:(Boolean)->Unit={})
     fun exportChatGptContext(currentSetId:String,onResult:(Result<String>)->Unit)
 }
