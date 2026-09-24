@@ -9,19 +9,23 @@ import com.gymbuddy.app.ProductionFrameAnalyzer
 import com.gymbuddy.app.ProductionPoseFrameProcessor
 import com.gymbuddy.app.TextToSpeechCueSink
 import com.gymbuddy.data.GymBuddyDatabaseFactory
-import com.gymbuddy.data.RoomEvidenceRepository
 import com.gymbuddy.data.RoomChatGptContextRepository
-import com.gymbuddy.data.RoomWorkoutFlowRepository
+import com.gymbuddy.data.RoomEvidenceRepository
+import com.gymbuddy.data.RoomPersonalCalibrationLifecycle
 import com.gymbuddy.data.RoomPersonalCalibrationRepository
+import com.gymbuddy.data.RoomWorkoutFlowRepository
 import com.gymbuddy.domain.export.ChatGptContextExporter
+import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
 import com.gymbuddy.domain.persistence.RestCheckpointDraft
 import com.gymbuddy.domain.persistence.SetRecord
 import com.gymbuddy.domain.persistence.WorkoutSessionRecord
+import com.gymbuddy.domain.profile.AnalysisConfig
 import com.gymbuddy.domain.profiles.ExerciseBundle
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
+import com.gymbuddy.domain.tracking.TrackingObservationContext
 import com.gymbuddy.frames.FrameConsumer
 import java.util.concurrent.Callable
 import java.util.concurrent.Executor
@@ -29,16 +33,21 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
-    private val worker:ExecutorService=Executors.newSingleThreadExecutor()
+class DefaultWorkoutRuntime(
+    context:Context,
+    private val cameraMotionSignals:CameraMotionSignalStore=CameraMotionSignalStore(),
+):WorkoutRuntimeGateway {
+    @Volatile private var workerThread:Thread?=null
+    private val worker:ExecutorService=Executors.newSingleThreadExecutor{task->
+        Thread(task,"gym-buddy-runtime").also{workerThread=it}
+    }
     private val poseAnalyzer=MediaPipePoseAnalyzer(context.applicationContext)
     private val database=GymBuddyDatabaseFactory.create(context.applicationContext)
     private val repository=RoomEvidenceRepository(database.evidenceDao())
     private val flowRepository=RoomWorkoutFlowRepository(database.evidenceDao())
     private val calibrationRepository=RoomPersonalCalibrationRepository(database.evidenceDao())
-    private val configResolver=RuntimeAnalysisConfigResolver {
-        if(worker.isShutdown)null else worker.submit(Callable { calibrationRepository.loadActive() }).get()
-    }
+    private val calibrationLifecycle=RoomPersonalCalibrationLifecycle(database.evidenceDao())
+    private val configResolver=RuntimeAnalysisConfigResolver(::loadCalibrationSync)
     private val chatGptExporter=ChatGptContextExporter(RoomChatGptContextRepository(database.evidenceDao()))
     private val ttsFeedback=TextToSpeechCueSink(context.applicationContext){delivery->
         if(!worker.isShutdown){
@@ -53,6 +62,7 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
     private var activeSession:WorkoutSessionRecord?=null
     private var activeExecution:ExerciseExecutionRecord?=null
     private var activeSet:SetRecord?=null
+    private var activeConfig:AnalysisConfig?=null
 
     override val analysisExecutor:Executor
         get()=worker
@@ -61,12 +71,13 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
     override fun beginExercise(exerciseId:String){
         check(currentAnalyzer==null){"Cannot change exercise while a set analyzer is active"}
         val resolved=InitialExerciseProfiles.resolveByExternalId(exerciseId)
-            ?: error("Unsupported exercise_id: $exerciseId")
+            ?: error("Unsupported exercise_id: "+exerciseId)
         bundle=resolved
         workoutIdentity.beginExercise(resolved.definition.exerciseId)
         activeSession=null
         activeExecution=null
         activeSet=null
+        activeConfig=null
         latestCueText=null
     }
 
@@ -78,7 +89,7 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
         check(currentAnalyzer==null){"Cannot resume while a set analyzer is active"}
         require(execution.sessionId==session.sessionId)
         val resolved=InitialExerciseProfiles.resolveByExternalId(execution.exerciseId)
-            ?: error("Unsupported exercise_id: ${execution.exerciseId}")
+            ?: error("Unsupported exercise_id: "+execution.exerciseId)
         bundle=resolved
         workoutIdentity.resume(
             sessionId=session.sessionId,
@@ -89,6 +100,7 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
         activeSession=null
         activeExecution=null
         activeSet=null
+        activeConfig=null
         latestCueText=null
     }
 
@@ -99,8 +111,9 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
         val selected=requireNotNull(bundle){"beginExercise or resumeExercise must be called before beginSet"}
         val selectedSessionId=requireNotNull(workoutIdentity.sessionId)
         val selectedExecutionId=requireNotNull(workoutIdentity.executionId)
-        val setId="$selectedExecutionId:set:$setOrdinal"
+        val setId=selectedExecutionId+":set:"+setOrdinal
         val config=configResolver.resolve(selected)
+        activeConfig=config
         latestCueText=null
         activeSession=null
         activeExecution=null
@@ -111,36 +124,46 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
         )
         val feedback=CompositeCueFeedbackSink(visual,ttsFeedback)
 
-        currentAnalyzer=ProductionFrameAnalyzer(poseAnalyzer){firstFrame->
-            val started=workoutIdentity.ensureStarted(firstFrame.timestampUs)
-            val sessionStarted=started.sessionStartedAtUs
-            val executionStarted=started.executionStartedAtUs
-            val sessionRecord=WorkoutSessionRecord(selectedSessionId,sessionStarted)
-            val executionRecord=ExerciseExecutionRecord(
-                selectedExecutionId,
-                selectedSessionId,
-                selected.definition.exerciseId,
-                executionStarted,
-            )
-            val setRecord=SetRecord(
-                setId,
-                selectedExecutionId,
-                setOrdinal,
-                firstFrame.timestampUs,
-                actualLoad,
-            )
-            activeSession=sessionRecord
-            activeExecution=executionRecord
-            activeSet=setRecord
-            ProductionPoseFrameProcessor(
-                config=config,
-                repository=repository,
-                session=sessionRecord,
-                execution=executionRecord,
-                set=setRecord,
-                feedback=feedback,
-            )
-        }
+        currentAnalyzer=ProductionFrameAnalyzer(
+            poseAnalyzer=poseAnalyzer,
+            processorFactory={firstFrame->
+                val started=workoutIdentity.ensureStarted(firstFrame.timestampUs)
+                val sessionStarted=started.sessionStartedAtUs
+                val executionStarted=started.executionStartedAtUs
+                val sessionRecord=WorkoutSessionRecord(selectedSessionId,sessionStarted)
+                val executionRecord=ExerciseExecutionRecord(
+                    selectedExecutionId,
+                    selectedSessionId,
+                    selected.definition.exerciseId,
+                    executionStarted,
+                )
+                val setRecord=SetRecord(
+                    setId,
+                    selectedExecutionId,
+                    setOrdinal,
+                    firstFrame.timestampUs,
+                    actualLoad,
+                )
+                activeSession=sessionRecord
+                activeExecution=executionRecord
+                activeSet=setRecord
+                val processor=ProductionPoseFrameProcessor(
+                    config=config,
+                    repository=repository,
+                    session=sessionRecord,
+                    execution=executionRecord,
+                    set=setRecord,
+                    feedback=feedback,
+                )
+                flowRepository.saveActiveSetCheckpoint(setRecord.setId)
+                processor
+            },
+            observationContextProvider={frame->
+                TrackingObservationContext(
+                    cameraMotionScore=cameraMotionSignals.consume(frame.timestampUs),
+                )
+            },
+        )
     }
 
     override fun frameConsumer(listener:(WorkoutRuntimeSnapshot)->Unit):FrameConsumer<MPImage> =
@@ -172,17 +195,20 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
             val session=activeSession
             val execution=activeExecution
             val set=activeSet
-            if(analyzer==null||session==null||execution==null||set==null){
+            val config=activeConfig
+            if(analyzer==null||session==null||execution==null||set==null||config==null){
                 onCompleted(null)
                 return@execute
             }
             analyzer.finishSet()
+            runCatching{calibrationLifecycle.onCompletedSet(set.setId,config)}
             synchronized(this){
                 if(currentAnalyzer===analyzer){
                     currentAnalyzer=null
                     activeSession=null
                     activeExecution=null
                     activeSet=null
+                    activeConfig=null
                     latestCueText=null
                 }
             }
@@ -202,8 +228,39 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
         worker.execute{onLoaded(flowRepository.loadRestCheckpoint())}
     }
 
+    override fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit){
+        if(worker.isShutdown){
+            onLoaded(null)
+            return
+        }
+        worker.execute{onLoaded(flowRepository.loadActiveSetRecovery())}
+    }
+
+    override fun markActiveSetInterrupted(
+        setId:String,
+        recoveredAtEpochMs:Long,
+        committedReps:Int,
+    ){
+        if(!worker.isShutdown){
+            worker.execute{
+                flowRepository.markInterruptedSet(setId,recoveredAtEpochMs,committedReps)
+            }
+        }
+    }
+
     override fun clearRestCheckpoint(){
         if(!worker.isShutdown)worker.execute{flowRepository.clearRestCheckpoint()}
+    }
+
+    override fun clearPersonalCalibration(onCompleted:(Boolean)->Unit){
+        if(worker.isShutdown){
+            onCompleted(false)
+            return
+        }
+        worker.execute{
+            val result=runCatching{calibrationRepository.clearActive()}.isSuccess
+            onCompleted(result)
+        }
     }
 
     override fun exportChatGptContext(
@@ -221,10 +278,16 @@ class DefaultWorkoutRuntime(context:Context):WorkoutRuntimeGateway {
 
     override fun close(){
         currentAnalyzer=null
+        cameraMotionSignals.clear()
         ttsFeedback.close()
         worker.shutdown()
         runCatching{worker.awaitTermination(2,TimeUnit.SECONDS)}
         poseAnalyzer.close()
         database.close()
     }
+
+    private fun loadCalibrationSync()=
+        if(worker.isShutdown)null
+        else if(Thread.currentThread()===workerThread)calibrationRepository.loadActive()
+        else worker.submit(Callable{calibrationRepository.loadActive()}).get()
 }
