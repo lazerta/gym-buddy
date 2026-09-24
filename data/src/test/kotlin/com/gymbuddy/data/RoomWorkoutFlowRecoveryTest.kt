@@ -52,7 +52,7 @@ class RoomWorkoutFlowRecoveryTest {
                     repId="rep-1",
                     ordinal=1,
                     stepId="cycle",
-                    primitive=MovementPrimitive.SQUAT,
+                    primitive=MovementPrimitive.PRESS,
                     startedAtUs=200L,
                     completedAtUs=500L,
                     classification=RepClassification.NORMAL,
