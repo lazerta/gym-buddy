@@ -40,6 +40,7 @@ import androidx.room.*
     @Query("SELECT d.* FROM cue_deliveries d JOIN cue_events c ON c.cueId=d.cueId WHERE c.setId=:id ORDER BY c.emittedAtUs, d.cueId") abstract fun deliveriesForSet(id:String):List<CueDeliveryEntity>
     @Query("SELECT * FROM tracking_quality_summaries WHERE setId=:id") abstract fun trackingSummary(id:String):TrackingQualitySummaryEntity?
     @Query("SELECT * FROM set_summaries WHERE setId=:id") abstract fun setSummary(id:String):SetSummaryEntity?
+
     @Query("""
         SELECT s.setId
         FROM sets s
@@ -48,18 +49,56 @@ import androidx.room.*
         WHERE e.exerciseId=:exerciseId
           AND s.setId!=:currentSetId
           AND (
-              ss.endedAtUs<:beforeEndedAtUs OR
-              (ss.endedAtUs=:beforeEndedAtUs AND s.setId<:currentSetId)
+              ss.endedAtEpochMs<:beforeEndedAtEpochMs OR
+              (ss.endedAtEpochMs=:beforeEndedAtEpochMs AND s.setId<:currentSetId)
           )
-        ORDER BY ss.endedAtUs DESC, s.setId DESC
+        ORDER BY ss.endedAtEpochMs DESC, s.setId DESC
         LIMIT :limit
     """)
     abstract fun recentComparableSetIds(
         exerciseId:String,
         currentSetId:String,
-        beforeEndedAtUs:Long,
+        beforeEndedAtEpochMs:Long,
         limit:Int,
     ):List<String>
+
+    @Query("""
+        SELECT ws.sessionId
+        FROM workout_sessions ws
+        JOIN exercise_executions e ON e.sessionId=ws.sessionId
+        JOIN sets s ON s.executionId=e.executionId
+        JOIN set_summaries ss ON ss.setId=s.setId
+        WHERE e.exerciseId=:exerciseId
+          AND ws.sessionId!=:currentSessionId
+          AND (
+              ws.startedAtEpochMs<:beforeSessionStartedAtEpochMs OR
+              (ws.startedAtEpochMs=:beforeSessionStartedAtEpochMs AND ws.sessionId<:currentSessionId)
+          )
+        GROUP BY ws.sessionId
+        ORDER BY ws.startedAtEpochMs DESC, ws.sessionId DESC
+        LIMIT :limit
+    """)
+    abstract fun recentComparableSessionIds(
+        exerciseId:String,
+        currentSessionId:String,
+        beforeSessionStartedAtEpochMs:Long,
+        limit:Int,
+    ):List<String>
+
+    @Query("""
+        SELECT s.setId
+        FROM sets s
+        JOIN exercise_executions e ON e.executionId=s.executionId
+        JOIN set_summaries ss ON ss.setId=s.setId
+        WHERE e.sessionId=:sessionId
+          AND e.exerciseId=:exerciseId
+        ORDER BY ss.endedAtEpochMs, s.setOrdinal, s.setId
+    """)
+    abstract fun completedSetIdsForSessionExercise(
+        sessionId:String,
+        exerciseId:String,
+    ):List<String>
+
     @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:checkpointId AND completedSetId=:setId") abstract fun deleteWorkoutFlowStateForSet(checkpointId:String,setId:String)
