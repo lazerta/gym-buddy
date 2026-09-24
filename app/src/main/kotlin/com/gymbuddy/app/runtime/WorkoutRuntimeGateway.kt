@@ -37,10 +37,10 @@ interface WorkoutRuntimeGateway:AutoCloseable {
     fun frameConsumer(listener:(WorkoutRuntimeSnapshot)->Unit):FrameConsumer<MPImage>
     fun saveRestCheckpoint(checkpoint:RestCheckpointDraft)
     fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit)
-    fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit)
-    fun markActiveSetInterrupted(setId:String,recoveredAtEpochMs:Long,committedReps:Int)
+    fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit){onLoaded(null)}
+    fun markActiveSetInterrupted(setId:String,recoveredAtEpochMs:Long,committedReps:Int)=Unit
     fun clearRestCheckpoint()
-    fun resetPersonalCalibration(exerciseId:String,onCompleted:(Boolean)->Unit={})
-    fun clearPersonalCalibration(onCompleted:(Boolean)->Unit={})
+    fun resetPersonalCalibration(exerciseId:String,onCompleted:(Boolean)->Unit={}){onCompleted(false)}
+    fun clearPersonalCalibration(onCompleted:(Boolean)->Unit={}){onCompleted(false)}
     fun exportChatGptContext(currentSetId:String,onResult:(Result<String>)->Unit)
 }
