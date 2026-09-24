@@ -11,6 +11,8 @@ enum class CalibrationSessionEligibility {
     IDENTITY_UNCERTAIN,
     CAMERA_DISTURBANCE,
     INTERRUPTED,
+    FORM_DEVIATION,
+    LOW_CONFIDENCE,
 }
 
 data class CalibrationSessionEvidence(
