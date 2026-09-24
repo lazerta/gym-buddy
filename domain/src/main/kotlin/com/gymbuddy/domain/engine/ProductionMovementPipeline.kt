@@ -52,7 +52,7 @@ class ProductionMovementPipeline(
         val previous = lastFrameTimestampUs
         if (previous != null && frame.timestampUs <= previous) {
             val tracking = TrackingQualityResult(TrackingQualityState.PAUSED, TrackingQualityReason.NON_MONOTONIC_TIMESTAMP, lastLock.targetCandidateIndex, null, null)
-            return result(frame.timestampUs,lastLock,tracking,pausedMovement(frame.timestampUs),CameraGuidanceAction.CANNOT_ASSESS)
+            return result(frame.timestampUs,lastLock,tracking,pausedMovement(frame.timestampUs),CameraGuidanceAction.CANNOT_ASSESS,context.observedViewClass)
         }
         lastFrameTimestampUs = frame.timestampUs
         val lock = subjectLock.update(frame)
@@ -77,7 +77,7 @@ class ProductionMovementPipeline(
         }
         if (lifecycleAfterGuidance == SetLifecycleState.CAMERA_GUIDANCE) {
             val tracking = TrackingQualityResult(TrackingQualityState.PAUSED,TrackingQualityReason.CAMERA_NOT_READY,lock.targetCandidateIndex,null,null)
-            return result(frame.timestampUs,lock,tracking,pausedMovement(frame.timestampUs),guidance)
+            return result(frame.timestampUs,lock,tracking,pausedMovement(frame.timestampUs),guidance,effectiveContext.observedViewClass)
         }
 
         val tracking = trackingGate.evaluate(frame,lock,config.exerciseProfile.cameraProfile,effectiveContext)
@@ -100,28 +100,28 @@ class ProductionMovementPipeline(
             }
         }
         if (!tracking.allowsBiomechanics) {
-            return result(frame.timestampUs,lock,tracking,interruptOnce(frame.timestampUs),guidance)
+            return result(frame.timestampUs,lock,tracking,interruptOnce(frame.timestampUs),guidance,effectiveContext.observedViewClass)
         }
         val candidate = target
         if (candidate == null) {
             val paused = TrackingQualityResult(TrackingQualityState.PAUSED,TrackingQualityReason.TARGET_NOT_AVAILABLE,lock.targetCandidateIndex,null,null)
-            return result(frame.timestampUs,lock,paused,interruptOnce(frame.timestampUs),guidance)
+            return result(frame.timestampUs,lock,paused,interruptOnce(frame.timestampUs),guidance,effectiveContext.observedViewClass)
         }
         return when (val normalized = normalizer.normalize(candidate)) {
             is CoordinateNormalizationResult.Valid -> {
                 interruptionGate.reset()
                 val movement=engine.process(frame.timestampUs,normalized.pose)
                 lifecycle.onMovement(movement.primitives)
-                result(frame.timestampUs,lock,tracking,movement,guidance)
+                result(frame.timestampUs,lock,tracking,movement,guidance,effectiveContext.observedViewClass)
             }
             is CoordinateNormalizationResult.Unknown -> {
                 val paused = TrackingQualityResult(TrackingQualityState.PAUSED,TrackingQualityReason.INSUFFICIENT_EVIDENCE,lock.targetCandidateIndex,null,null)
-                result(frame.timestampUs,lock,paused,interruptOnce(frame.timestampUs),guidance)
+                result(frame.timestampUs,lock,paused,interruptOnce(frame.timestampUs),guidance,effectiveContext.observedViewClass)
             }
         }
     }
 
     private fun interruptOnce(ts:Long):MovementEngineOutput = if(interruptionGate.onInvalid()) engine.onInterruption(ts) else pausedMovement(ts)
-    private fun result(ts:Long,lock:PrimarySubjectLockResult,tracking:TrackingQualityResult,movement:MovementEngineOutput,guidance:CameraGuidanceAction)=ProductionPipelineResult(ts,lock,tracking,movement,guidance,lifecycle.state)
+    private fun result(ts:Long,lock:PrimarySubjectLockResult,tracking:TrackingQualityResult,movement:MovementEngineOutput,guidance:CameraGuidanceAction,observedViewClass:ViewClass?)=ProductionPipelineResult(ts,lock,tracking,movement,guidance,lifecycle.state,observedViewClass)
     private fun pausedMovement(ts: Long) = MovementEngineOutput(ts,null,null,emptyList(),emptyList(),emptyList(),emptyList(),emptyList(),true)
 }
