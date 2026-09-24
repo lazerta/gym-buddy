@@ -8,29 +8,16 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.createSavedStateHandle
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import com.gymbuddy.app.controller.WorkoutController
+import com.gymbuddy.app.controller.WorkoutDay
 import com.gymbuddy.app.runtime.DefaultWorkoutRuntime
 import com.gymbuddy.app.ui.GymBuddyApp
 
 class MainActivity:ComponentActivity(){
-    private val controller:WorkoutController by viewModels{
-        viewModelFactory{
-            initializer{
-                WorkoutController(
-                    runtime=DefaultWorkoutRuntime(applicationContext),
-                    savedStateHandle=createSavedStateHandle(),
-                )
-            }
-        }
-    }
-
+    private lateinit var controller:WorkoutController
     private lateinit var cameraBridge:CameraSessionBridge
 
     private val cameraPermission=registerForActivityResult(
@@ -46,6 +33,13 @@ class MainActivity:ComponentActivity(){
 
     override fun onCreate(savedInstanceState:Bundle?){
         super.onCreate(savedInstanceState)
+        val initialDay=runCatching{
+            WorkoutDay.valueOf(savedInstanceState?.getString(STATE_SELECTED_DAY)?:WorkoutDay.PUSH.name)
+        }.getOrDefault(WorkoutDay.PUSH)
+        controller=WorkoutController(
+            runtime=DefaultWorkoutRuntime(applicationContext),
+            initialDay=initialDay,
+        )
         cameraBridge=CameraSessionBridge(
             context=this,
             lifecycleOwner=this,
@@ -76,8 +70,14 @@ class MainActivity:ComponentActivity(){
         }
     }
 
+    override fun onSaveInstanceState(outState:Bundle){
+        outState.putString(STATE_SELECTED_DAY,controller.currentDay.name)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy(){
         cameraBridge.close()
+        controller.close()
         super.onDestroy()
     }
 
@@ -114,4 +114,5 @@ class MainActivity:ComponentActivity(){
         )==PackageManager.PERMISSION_GRANTED
         if(granted)cameraBridge.start() else cameraPermission.launch(Manifest.permission.CAMERA)
     }
+    companion object { private const val STATE_SELECTED_DAY="selected_day" }
 }

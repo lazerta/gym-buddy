@@ -6,6 +6,9 @@ import com.gymbuddy.domain.pose.*
 import com.gymbuddy.domain.engine.ProductionMovementPipeline
 import com.gymbuddy.domain.profile.*
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
+import com.gymbuddy.domain.lifecycle.SetLifecycleState
+import com.gymbuddy.domain.tracking.TrackingObservationContext
+import com.gymbuddy.domain.tracking.TrackingQualityReason
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.math.cos
@@ -87,6 +90,44 @@ class InitialExerciseProfilesIntegrationTest {
             }
             assertEquals("${bundle.definition.exerciseId} production pipeline rep count", 1, completed)
         }
+    }
+
+    @Test fun materialCameraDisturbanceDuringPartialRepRequiresFreshGuidanceAndCannotStitchRep() {
+        val bundle = InitialExerciseProfiles.dumbbellLateralRaise
+        val config = AnalysisConfigResolver.resolve(bundle.definition, bundle.profile, bundle.equipment)
+        val pipeline = ProductionMovementPipeline(config)
+        var completed = 0
+
+        fun process(ts:Long, angle:Double, cameraMotionScore:Double?=null) =
+            pipeline.process(
+                PoseFrame(ts, ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))),
+                TrackingObservationContext(cameraMotionScore=cameraMotionScore),
+            ).also { completed += it.movement.repEvidence.size }
+
+        process(0,20.0)
+        process(120_000,20.0)
+        process(240_000,20.0)
+        val active=process(500_000,55.0)
+        assertEquals(SetLifecycleState.ACTIVE_SET,active.lifecycleState)
+
+        process(650_000,75.0)
+        val disturbed=process(700_000,75.0,.90)
+        assertEquals(TrackingQualityReason.CAMERA_DISTURBANCE,disturbed.tracking.reason)
+        assertEquals(SetLifecycleState.CAMERA_GUIDANCE,disturbed.lifecycleState)
+        assertEquals(0,completed)
+
+        val reacquire1=process(800_000,20.0)
+        assertEquals(SetLifecycleState.CAMERA_GUIDANCE,reacquire1.lifecycleState)
+        val reacquire2=process(920_000,20.0)
+        assertNotEquals(SetLifecycleState.ACTIVE_SET,reacquire2.lifecycleState)
+
+        process(1_040_000,20.0)
+        process(1_300_000,55.0)
+        process(1_540_000,90.0)
+        process(1_780_000,55.0)
+        process(2_020_000,20.0)
+
+        assertEquals(1,completed)
     }
 
     private fun candidateFor(exerciseId: String, angle: Double): PoseSubjectCandidate {

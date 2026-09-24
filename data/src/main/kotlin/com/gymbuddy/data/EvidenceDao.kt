@@ -19,6 +19,7 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertTrackingSummary(e:TrackingQualitySummaryEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertSetSummary(e:SetSummaryEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutFlowState(e:WorkoutFlowStateEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertPersonalCalibration(e:PersonalCalibrationProfileEntity)
 
     @Query("SELECT * FROM workout_sessions WHERE sessionId=:id") abstract fun session(id:String):WorkoutSessionEntity?
     @Query("SELECT * FROM exercise_executions WHERE executionId=:id") abstract fun execution(id:String):ExerciseExecutionEntity?
@@ -60,6 +61,8 @@ import androidx.room.*
     ):List<String>
     @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)
+    @Query("SELECT * FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun personalCalibration(slotId:String):PersonalCalibrationProfileEntity?
+    @Query("DELETE FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun deletePersonalCalibration(slotId:String)
 
     @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){insertSet(s);insertAnalysisContext(c)}
     @Transaction open fun insertRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>){insertRep(r);if(s.isNotEmpty())insertSignals(s);if(m.isNotEmpty())insertMetrics(m)}

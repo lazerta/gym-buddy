@@ -44,5 +44,22 @@ object GymBuddyMigrations {
         }
     }
 
-    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `personal_calibration_profiles` (
+                    `slotId` TEXT NOT NULL,
+                    `calibrationProfileId` TEXT NOT NULL,
+                    `profileVersion` INTEGER NOT NULL,
+                    `semanticHash` TEXT NOT NULL,
+                    `payload` TEXT NOT NULL,
+                    PRIMARY KEY(`slotId`)
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 }
