@@ -10,7 +10,7 @@ enum class CueResponseState { IMPROVED,UNCHANGED,WORSENED,UNKNOWN }
 data class CueResponse(val cueId:String,val repId:String,val state:CueResponseState)
 data class CueDecision(val cues:List<CueEvent>,val responses:List<CueResponse>)
 
-class CueEngine(private val policy:CuePolicy, rules:FormRuleSet?=null){
+class CueEngine(private val policy:CuePolicy, rules:FormRuleSet?=null,private val idNamespace:String?=null){
     private data class Pending(val cue:CueEvent,val observation:FormObservation)
     private val ruleById=rules?.rules?.associateBy{it.ruleId}.orEmpty()
     private val history=mutableMapOf<String,ArrayDeque<FormObservationState>>()
@@ -45,7 +45,7 @@ class CueEngine(private val policy:CuePolicy, rules:FormRuleSet?=null){
         }
         val selected=eligible.maxWithOrNull(compareBy<FormObservation>{severityRank(it.severity)}.thenBy{it.ruleId})
         val cues=if(selected==null)emptyList() else {
-            val cue=CueEvent("cue-${selected.ruleId}-${rep.completedAtUs}",selected.ruleId,rep.repId,rep.completedAtUs,selected.severity.name)
+            val baseId="cue-${selected.ruleId}-${rep.completedAtUs}"\n            val cueId=idNamespace?.let{it+"/"+baseId}?:baseId\n            val cue=CueEvent(cueId,selected.ruleId,rep.repId,rep.completedAtUs,selected.severity.name)
             pending=Pending(cue,selected);lastCueAt[selected.ruleId]=rep.completedAtUs;repeatCount[selected.ruleId]=(repeatCount[selected.ruleId]?:0)+1
             listOf(cue)
         }
