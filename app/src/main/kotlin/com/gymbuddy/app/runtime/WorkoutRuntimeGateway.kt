@@ -40,6 +40,7 @@ interface WorkoutRuntimeGateway:AutoCloseable {
     fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit)
     fun markActiveSetInterrupted(setId:String,recoveredAtEpochMs:Long,committedReps:Int)
     fun clearRestCheckpoint()
+    fun resetPersonalCalibration(exerciseId:String,onCompleted:(Boolean)->Unit={})
     fun clearPersonalCalibration(onCompleted:(Boolean)->Unit={})
     fun exportChatGptContext(currentSetId:String,onResult:(Result<String>)->Unit)
 }
