@@ -7,6 +7,7 @@ import com.gymbuddy.domain.profile.BaselineStatistic
 import com.gymbuddy.domain.profile.ExerciseBaseline
 import com.gymbuddy.domain.profile.ExerciseBaselineKey
 import com.gymbuddy.domain.profile.PersonalCalibrationProfile
+import com.gymbuddy.domain.profile.PersonalCalibrationVersionRef
 import com.gymbuddy.domain.profile.ViewClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -59,6 +60,14 @@ class RoomPersonalCalibrationRepositoryTest {
             repo.saveActive(first)
             repo.saveActive(second)
             assertEquals(second,repo.loadActive())
+            assertEquals(
+                first,
+                repo.loadVersion(PersonalCalibrationVersionRef.from(first)),
+            )
+            assertEquals(
+                second,
+                repo.loadVersion(PersonalCalibrationVersionRef.from(second)),
+            )
         } finally { db.close() }
     }
 
