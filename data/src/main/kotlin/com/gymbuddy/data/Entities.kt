@@ -95,3 +95,14 @@ data class InterruptedSetEntity(@PrimaryKey val setId:String,val recoveredAtEpoc
 
 @Entity(tableName="personal_calibration_profiles")
 data class PersonalCalibrationProfileEntity(@PrimaryKey val slotId:String,val calibrationProfileId:String,val profileVersion:Int,val semanticHash:String,val payload:String)
+
+@Entity(
+    tableName="personal_calibration_profile_history",
+    primaryKeys=["calibrationProfileId","profileVersion"],
+)
+data class PersonalCalibrationProfileHistoryEntity(
+    val calibrationProfileId:String,
+    val profileVersion:Int,
+    val semanticHash:String,
+    val payload:String,
+)
