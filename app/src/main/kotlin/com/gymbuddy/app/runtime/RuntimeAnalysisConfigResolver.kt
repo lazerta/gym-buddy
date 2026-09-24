@@ -8,13 +8,19 @@ import com.gymbuddy.domain.profiles.ExerciseBundle
 
 internal class RuntimeAnalysisConfigResolver(
     private val loadCalibration:()->PersonalCalibrationProfile?,
+    private val onCalibrationRejected:(Throwable)->Unit={},
 ){
     constructor(repository:PersonalCalibrationRepository):this(repository::loadActive)
 
-    fun resolve(bundle:ExerciseBundle):AnalysisConfig = AnalysisConfigResolver.resolve(
-        bundle.definition,
-        bundle.profile,
-        bundle.equipment,
-        loadCalibration(),
-    )
+    fun resolve(bundle:ExerciseBundle):AnalysisConfig {
+        val calibration=runCatching{loadCalibration()}
+            .onFailure(onCalibrationRejected)
+            .getOrNull()
+        return AnalysisConfigResolver.resolve(
+            bundle.definition,
+            bundle.profile,
+            bundle.equipment,
+            calibration,
+        )
+    }
 }
