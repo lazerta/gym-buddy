@@ -61,6 +61,39 @@ class ChatGptContextExporterTest {
     }
 
     @Test
+    fun exportUsesWallClockChronologyAcrossMonotonicTimebaseReset(){
+        val current=context(
+            "current","exec-current","session-current",
+            "incline_dumbbell_press",
+            endedAtUs=1_000L,
+            reverse=false,
+            endedAtEpochMs=20_000L,
+        )
+        val oldBeforeReboot=context(
+            "old","exec-old","session-old",
+            "incline_dumbbell_press",
+            endedAtUs=1_000_000L,
+            reverse=false,
+            endedAtEpochMs=10_000L,
+        )
+        val future=context(
+            "future","exec-future","session-future",
+            "incline_dumbbell_press",
+            endedAtUs=100L,
+            reverse=false,
+            endedAtEpochMs=30_000L,
+        )
+
+        val exported=ChatGptContextExporter(
+            FakeRepository(current,listOf(future,oldBeforeReboot))
+        ).export("current")
+
+        assertTrue(exported.contains("\"set_id\":\"old\""))
+        assertFalse(exported.contains("\"set_id\":\"future\""))
+        assertTrue(exported.contains("\"ended_at_epoch_ms\":20000"))
+    }
+
+    @Test
     fun optionalContextIsSourceReferencedAndEscaped(){
         val current=context("current","exec","session","incline_dumbbell_press",300,reverse=false)
         val exported=ChatGptContextExporter(FakeRepository(current,emptyList())).export(
@@ -82,6 +115,7 @@ class ChatGptContextExporterTest {
         exerciseId:String,
         endedAtUs:Long,
         reverse:Boolean,
+        endedAtEpochMs:Long=0L,
     ):ChatGptSetContext{
         val p=provenance(exerciseId)
         val signalA=SignalEvidence("a_signal",SignalUnit.DEGREES,1.0,2.0,1.5,2.0,.9)
@@ -122,7 +156,9 @@ class ChatGptContextExporterTest {
             cues=listOf(cue),
             responses=listOf(response),
             tracking=TrackingQualitySummary(setId,10,2,1,0),
-            summary=SetSummary(setId,endedAtUs,2,0,0),
+            summary=SetSummary(
+                setId,endedAtUs,2,0,0,endedAtEpochMs
+            ),
             cueDeliveries=listOf(CueDeliveryRecord(cue.cueId,CueDeliveryState.COMPLETED)),
             cueObservationIds=mapOf(cue.cueId to obs1.observationId),
         )
