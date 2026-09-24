@@ -365,7 +365,12 @@ class WorkoutController(
     }
 
     fun resetPersonalCalibration(onCompleted:(Boolean)->Unit={}){
-        runtime.clearPersonalCalibration(onCompleted)
+        val exerciseId=selectedExerciseId
+        if(exerciseId==null){
+            onCompleted(false)
+            return
+        }
+        runtime.resetPersonalCalibration(exerciseId,onCompleted)
     }
 
     fun close(){runtime.close()}
