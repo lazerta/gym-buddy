@@ -13,7 +13,7 @@ data class MetricEvidence(val metricId:String,val unit:SignalUnit,val value:Evid
 data class RepEvidence(val repId:String,val ordinal:Int,val stepId:String,val primitive:MovementPrimitive,val startedAtUs:Long,val completedAtUs:Long,val classification:RepClassification,val signals:Map<String,SignalEvidence>,val metrics:Map<String,MetricEvidence>,val provenance:AnalysisProvenance)
 
 class RepEvidenceBuilder {
-    fun build(event:RepDetectionEvent,frames:List<MovementSignalFrame>,config:AnalysisConfig):RepEvidence{
+    fun build(event:RepDetectionEvent,frames:List<MovementSignalFrame>,config:AnalysisConfig,idNamespace:String?=null):RepEvidence{
         require(event.kind==RepCompletionKind.COMPLETED)
         val relevant=frames.filter{it.timestampUs in event.startedAtUs..event.completedAtUs}
         val signals=config.exerciseProfile.signalProfile.definitions.associate{d->
@@ -24,7 +24,7 @@ class RepEvidenceBuilder {
             }
         }
         val metrics=config.exerciseProfile.metricProfile.metrics.associate{m->m.metricId to MetricEvidence(m.metricId,m.unit,metricValue(m,signals,relevant))}
-        return RepEvidence("rep-${event.ordinal}-${event.completedAtUs}",event.ordinal,event.stepId,event.primitive,event.startedAtUs,event.completedAtUs,event.classification!!,signals,metrics,config.provenance)
+        val baseId="rep-${event.ordinal}-${event.completedAtUs}"\n        val repId=idNamespace?.let{it+"/"+baseId}?:baseId\n        return RepEvidence(repId,event.ordinal,event.stepId,event.primitive,event.startedAtUs,event.completedAtUs,event.classification!!,signals,metrics,config.provenance)
     }
     private fun metricValue(def:MetricDefinition,signals:Map<String,SignalEvidence>,frames:List<MovementSignalFrame>):EvidenceValue{
         val sources=def.sourceSignalIds.mapNotNull(signals::get)
