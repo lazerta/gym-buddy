@@ -90,12 +90,20 @@ class ProductionMovementPipeline(
             } else context
 
         val priorLifecycle = lifecycle.state
+        val observedView=effectiveContext.observedViewClass
+            ?:config.preferredViewClass
+        val personalPrior=PersonalCameraPriorCodec.resolve(
+            calibration=config.personalCalibrationProfile,
+            profile=config.exerciseProfile.cameraProfile,
+            equipmentProfileId=config.equipmentProfile?.profileId,
+            viewClass=observedView,
+        )
         val guidance = cameraGuidanceEngine.evaluate(
             frame,
             lock,
             config.exerciseProfile.cameraProfile,
             effectiveContext,
-            PersonalCameraPriorCodec.resolve(config),
+            personalPrior,
         )
         val lifecycleAfterGuidance = lifecycle.onCameraGuidance(guidance)
         if (
