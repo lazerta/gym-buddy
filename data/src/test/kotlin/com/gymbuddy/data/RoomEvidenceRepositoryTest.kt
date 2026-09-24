@@ -93,6 +93,15 @@ class RoomEvidenceRepositoryTest {
             flowCursor.use { assertTrue(it.moveToFirst()) }
             val calibrationCursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_calibration_profiles'")
             calibrationCursor.use { assertTrue(it.moveToFirst()) }
+            val interruptedCursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='interrupted_sets'")
+            interruptedCursor.use { assertTrue(it.moveToFirst()) }
+            val flowColumnCursor=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`workout_flow_states`)")
+            flowColumnCursor.use {
+                val names=mutableSetOf<String>()
+                val nameIndex=it.getColumnIndexOrThrow("name")
+                while(it.moveToNext())names+=it.getString(nameIndex)
+                assertTrue("state" in names)
+            }
             val columnCursor=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`sets`)")
             columnCursor.use {
                 val names=mutableSetOf<String>()
