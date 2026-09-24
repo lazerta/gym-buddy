@@ -45,7 +45,7 @@ interface ChatGptContextRepository {
     fun loadRecentComparableSetContexts(
         exerciseId:String,
         currentSetId:String,
-        beforeEndedAtUs:Long,
+        beforeEndedAtEpochMs:Long,
         limit:Int,
     ):List<ChatGptSetContext>
 }
@@ -72,7 +72,7 @@ class ChatGptContextExporter(
         val history=repository.loadRecentComparableSetContexts(
             exerciseId=current.execution.exerciseId,
             currentSetId=currentSetId,
-            beforeEndedAtUs=currentChronology,
+            beforeEndedAtEpochMs=currentChronology,
             limit=historyLimit,
         )
             .filter{it.execution.exerciseId==current.execution.exerciseId}
