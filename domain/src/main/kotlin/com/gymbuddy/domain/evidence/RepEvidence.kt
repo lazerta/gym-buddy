@@ -13,38 +13,88 @@ data class MetricEvidence(val metricId:String,val unit:SignalUnit,val value:Evid
 data class RepEvidence(val repId:String,val ordinal:Int,val stepId:String,val primitive:MovementPrimitive,val startedAtUs:Long,val completedAtUs:Long,val classification:RepClassification,val signals:Map<String,SignalEvidence>,val metrics:Map<String,MetricEvidence>,val provenance:AnalysisProvenance)
 
 class RepEvidenceBuilder {
-    fun build(event:RepDetectionEvent,frames:List<MovementSignalFrame>,config:AnalysisConfig,idNamespace:String?=null):RepEvidence{
+    fun build(
+        event:RepDetectionEvent,
+        frames:List<MovementSignalFrame>,
+        config:AnalysisConfig,
+        idNamespace:String?=null,
+    ):RepEvidence{
         require(event.kind==RepCompletionKind.COMPLETED)
         val relevant=frames.filter{it.timestampUs in event.startedAtUs..event.completedAtUs}
         val signals=config.exerciseProfile.signalProfile.definitions.associate{d->
             val samples=relevant.mapNotNull{it.values[d.signalId]}.filter{it.value!=null}
-            d.signalId to if(samples.isEmpty()) SignalEvidence(d.signalId,d.unit,null,null,null,null,null) else {
+            d.signalId to if(samples.isEmpty()) {
+                SignalEvidence(d.signalId,d.unit,null,null,null,null,null)
+            } else {
                 val vals=samples.map{it.value!!}
-                SignalEvidence(d.signalId,d.unit,vals.minOrNull(),vals.maxOrNull(),vals.average(),vals.last(),samples.mapNotNull{it.confidence}.minOrNull())
+                SignalEvidence(
+                    d.signalId,d.unit,vals.minOrNull(),vals.maxOrNull(),vals.average(),
+                    vals.last(),samples.mapNotNull{it.confidence}.minOrNull()
+                )
             }
         }
-        val metrics=config.exerciseProfile.metricProfile.metrics.associate{m->m.metricId to MetricEvidence(m.metricId,m.unit,metricValue(m,signals,relevant))}
-        val baseId="rep-${event.ordinal}-${event.completedAtUs}"\n        val repId=idNamespace?.let{it+"/"+baseId}?:baseId\n        return RepEvidence(repId,event.ordinal,event.stepId,event.primitive,event.startedAtUs,event.completedAtUs,event.classification!!,signals,metrics,config.provenance)
+        val metrics=config.exerciseProfile.metricProfile.metrics.associate{m->
+            m.metricId to MetricEvidence(
+                m.metricId,m.unit,metricValue(m,signals,relevant)
+            )
+        }
+        val baseId="rep-"+event.ordinal+"-"+event.completedAtUs
+        val repId=idNamespace?.let{it+"/"+baseId}?:baseId
+        return RepEvidence(
+            repId,event.ordinal,event.stepId,event.primitive,event.startedAtUs,
+            event.completedAtUs,event.classification!!,signals,metrics,config.provenance
+        )
     }
-    private fun metricValue(def:MetricDefinition,signals:Map<String,SignalEvidence>,frames:List<MovementSignalFrame>):EvidenceValue{
+
+    private fun metricValue(
+        def:MetricDefinition,
+        signals:Map<String,SignalEvidence>,
+        frames:List<MovementSignalFrame>,
+    ):EvidenceValue{
         val sources=def.sourceSignalIds.mapNotNull(signals::get)
-        if(sources.size!=def.sourceSignalIds.size)return EvidenceValue.Unknown("source signal missing")
+        if(sources.size!=def.sourceSignalIds.size){
+            return EvidenceValue.Unknown("source signal missing")
+        }
         val confidence=sources.mapNotNull{it.confidence}.minOrNull()
         val ids=def.sourceSignalIds.toList()
         val value=when(def.aggregation){
-            MetricAggregation.MEAN->sources.mapNotNull{it.mean}.takeIf{it.size==sources.size}?.average()
-            MetricAggregation.MIN->sources.mapNotNull{it.min}.takeIf{it.size==sources.size}?.minOrNull()
-            MetricAggregation.MAX->sources.mapNotNull{it.max}.takeIf{it.size==sources.size}?.maxOrNull()
-            MetricAggregation.RANGE->if(sources.size==1&&sources[0].min!=null&&sources[0].max!=null)sources[0].max!!-sources[0].min!! else null
-            MetricAggregation.ABS_DIFFERENCE->if(ids.size==2)frames.mapNotNull{f->val a=f.values[ids[0]]?.value;val b=f.values[ids[1]]?.value;if(a!=null&&b!=null)abs(a-b)else null}.maxOrNull() else null
-            MetricAggregation.LAST->sources.mapNotNull{it.last}.takeIf{it.size==sources.size}?.average()
-            MetricAggregation.CROSSING_TIME_DIFFERENCE->if(ids.size==2){
-                val threshold=def.parameters["threshold"]?:return EvidenceValue.Unknown("crossing threshold missing")
-                val ta=frames.firstOrNull{(it.values[ids[0]]?.value?:Double.NEGATIVE_INFINITY)>=threshold}?.timestampUs
-                val tb=frames.firstOrNull{(it.values[ids[1]]?.value?:Double.NEGATIVE_INFINITY)>=threshold}?.timestampUs
-                if(ta!=null&&tb!=null)abs(ta-tb)/1000.0 else null
-            }else null
+            MetricAggregation.MEAN->
+                sources.mapNotNull{it.mean}.takeIf{it.size==sources.size}?.average()
+            MetricAggregation.MIN->
+                sources.mapNotNull{it.min}.takeIf{it.size==sources.size}?.minOrNull()
+            MetricAggregation.MAX->
+                sources.mapNotNull{it.max}.takeIf{it.size==sources.size}?.maxOrNull()
+            MetricAggregation.RANGE->
+                if(sources.size==1&&sources[0].min!=null&&sources[0].max!=null){
+                    sources[0].max!!-sources[0].min!!
+                }else null
+            MetricAggregation.ABS_DIFFERENCE->
+                if(ids.size==2){
+                    frames.mapNotNull{f->
+                        val a=f.values[ids[0]]?.value
+                        val b=f.values[ids[1]]?.value
+                        if(a!=null&&b!=null)abs(a-b)else null
+                    }.maxOrNull()
+                }else null
+            MetricAggregation.LAST->
+                sources.mapNotNull{it.last}.takeIf{it.size==sources.size}?.average()
+            MetricAggregation.CROSSING_TIME_DIFFERENCE->
+                if(ids.size==2){
+                    val threshold=def.parameters["threshold"]
+                        ?:return EvidenceValue.Unknown("crossing threshold missing")
+                    val ta=frames.firstOrNull{
+                        (it.values[ids[0]]?.value?:Double.NEGATIVE_INFINITY)>=threshold
+                    }?.timestampUs
+                    val tb=frames.firstOrNull{
+                        (it.values[ids[1]]?.value?:Double.NEGATIVE_INFINITY)>=threshold
+                    }?.timestampUs
+                    if(ta!=null&&tb!=null)abs(ta-tb)/1000.0 else null
+                }else null
         }
-        return if(value==null||!value.isFinite())EvidenceValue.Unknown("metric unsupported or insufficient evidence") else EvidenceValue.Known(value,confidence)
+        return if(value==null||!value.isFinite()){
+            EvidenceValue.Unknown("metric unsupported or insufficient evidence")
+        }else{
+            EvidenceValue.Known(value,confidence)
+        }
     }
 }
