@@ -60,7 +60,7 @@ class RoomChatGptContextRepositoryTest {
             val history=repository.loadRecentComparableSetContexts(
                 exerciseId=current.execution.exerciseId,
                 currentSetId=current.evidence.set.setId,
-                beforeEndedAtUs=current.evidence.summary!!.endedAtUs,
+                beforeEndedAtEpochMs=current.evidence.summary!!.endedAtUs,
                 limit=3,
             )
             assertEquals(listOf("recent","old"),history.map{it.evidence.set.setId})
@@ -120,7 +120,7 @@ class RoomChatGptContextRepositoryTest {
             val history=repository.loadRecentComparableSetContexts(
                 exerciseId="incline_dumbbell_press",
                 currentSetId="current-after-reboot",
-                beforeEndedAtUs=20_200L,
+                beforeEndedAtEpochMs=20_200L,
                 limit=3,
             )
 
