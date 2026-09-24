@@ -5,7 +5,6 @@ import com.gymbuddy.domain.movement.RepClassification
 import com.gymbuddy.domain.movement.RepCompletionKind
 import com.gymbuddy.domain.movement.RepDetectionEvent
 import com.gymbuddy.domain.profile.AnalysisConfigResolver
-import com.gymbuddy.domain.profile.FormObservationState
 import com.gymbuddy.domain.profile.MovementPrimitive
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
 import org.junit.Assert.assertNotEquals
