@@ -81,5 +81,28 @@ object GymBuddyMigrations {
         }
     }
 
-    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `workout_sessions` ADD COLUMN `startedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `exercise_executions` ADD COLUMN `startedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `startedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `set_summaries` ADD COLUMN `endedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeObservableFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeDegradedFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activePausedFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeUnknownFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `interruptionEpisodes` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `cameraDisturbanceEpisodes` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `observedViewClass` TEXT")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeFrameFillMean` REAL")
+        }
+    }
+
+    val ALL = arrayOf(
+        MIGRATION_1_2,
+        MIGRATION_2_3,
+        MIGRATION_3_4,
+        MIGRATION_4_5,
+        MIGRATION_5_6,
+    )
 }
