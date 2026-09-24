@@ -27,10 +27,10 @@ class ProductionFrameAnalyzer(
     }
 
     @Synchronized
-    fun finishSet() {
+    fun finishSet(endedAtEpochMs:Long=0L) {
         if (finished) return
         finished = true
         val timestamp = lastTimestampUs ?: return
-        processor?.finishSet(timestamp)
+        processor?.finishSet(timestamp,endedAtEpochMs)
     }
 }
