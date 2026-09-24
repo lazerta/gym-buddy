@@ -11,12 +11,12 @@ class CameraMotionContinuityTest {
         assertNull(estimator.update(CameraMotionSample(intArrayOf(10,20,30,40))))
         assertEquals(
             0.0,
-            estimator.update(CameraMotionSample(intArrayOf(12,18,35,41))),
+            requireNotNull(estimator.update(CameraMotionSample(intArrayOf(12,18,35,41)))),
             0.0,
         )
         assertEquals(
             .75,
-            estimator.update(CameraMotionSample(intArrayOf(100,90,35,120))),
+            requireNotNull(estimator.update(CameraMotionSample(intArrayOf(100,90,35,120)))),
             0.0,
         )
     }
