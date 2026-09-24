@@ -19,6 +19,7 @@ import com.gymbuddy.app.controller.WorkoutUiState
 fun ExerciseSummaryScreen(
     state:WorkoutUiState.Summary,
     onAskChatGpt:()->Unit,
+    onResetCalibration:()->Unit,
     onReturnToExercises:()->Unit,
 ){
     Column(
@@ -39,6 +40,10 @@ fun ExerciseSummaryScreen(
             modifier=Modifier.fillMaxWidth(),
             onClick=onAskChatGpt,
         ){Text("Ask ChatGPT")}
+        OutlinedButton(
+            modifier=Modifier.fillMaxWidth(),
+            onClick=onResetCalibration,
+        ){Text("Reset calibration")}
         Button(
             modifier=Modifier.fillMaxWidth(),
             onClick=onReturnToExercises,
