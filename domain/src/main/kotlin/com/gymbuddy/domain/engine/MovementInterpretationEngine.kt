@@ -28,13 +28,14 @@ class MovementInterpretationEngine(
     ),
     private val evidenceBuilder: RepEvidenceBuilder = RepEvidenceBuilder(),
     private val formEngine: FormAnalysisEngine = FormAnalysisEngine(),
+    cueEngine: CueEngine? = null,
     private val idNamespace:String?=null,
-    private val cueEngine: CueEngine = CueEngine(
+) {
+    private val cueEngine:CueEngine = cueEngine ?: CueEngine(
         config.exerciseProfile.cuePolicy,
         config.exerciseProfile.formRuleSet,
         idNamespace,
-    ),
-) {
+    )
     private val signalHistory = ArrayDeque<MovementSignalFrame>()
     private var lastTimestampUs: Long? = null
 
