@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.camera.core.Preview
 import androidx.lifecycle.LifecycleOwner
 import com.google.mediapipe.framework.image.MPImage
+import com.gymbuddy.app.runtime.CameraMotionSignalStore
 import com.gymbuddy.frames.FrameConsumer
 import java.util.concurrent.Executor
 
@@ -12,6 +13,7 @@ class CameraSessionBridge(
     private val lifecycleOwner:LifecycleOwner,
     private val analysisExecutor:Executor,
     private val frameConsumer:FrameConsumer<MPImage>,
+    private val cameraMotionSignals:CameraMotionSignalStore,
 ):AutoCloseable{
     private var previewSurfaceProvider:Preview.SurfaceProvider?=null
     private var source:CameraXFrameSource?=null
@@ -43,6 +45,7 @@ class CameraSessionBridge(
             lifecycleOwner=lifecycleOwner,
             analysisExecutor=analysisExecutor,
             previewSurfaceProvider=previewSurfaceProvider,
+            cameraMotionSignals=cameraMotionSignals,
         ).also{
             source=it
             it.start(frameConsumer)
