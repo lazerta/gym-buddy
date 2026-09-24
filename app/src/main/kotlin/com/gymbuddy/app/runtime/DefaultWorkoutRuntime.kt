@@ -23,6 +23,7 @@ import com.gymbuddy.domain.persistence.RestCheckpointDraft
 import com.gymbuddy.domain.persistence.SetRecord
 import com.gymbuddy.domain.persistence.WorkoutSessionRecord
 import com.gymbuddy.domain.profile.AnalysisConfig
+import com.gymbuddy.domain.profile.AnalysisConfigResolver
 import com.gymbuddy.domain.profiles.ExerciseBundle
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
 import com.gymbuddy.domain.tracking.TrackingObservationContext
@@ -250,6 +251,29 @@ class DefaultWorkoutRuntime(
 
     override fun clearRestCheckpoint(){
         if(!worker.isShutdown)worker.execute{flowRepository.clearRestCheckpoint()}
+    }
+
+    override fun resetPersonalCalibration(
+        exerciseId:String,
+        onCompleted:(Boolean)->Unit,
+    ){
+        if(worker.isShutdown){
+            onCompleted(false)
+            return
+        }
+        worker.execute{
+            val result=runCatching{
+                val selected=InitialExerciseProfiles.resolveByExternalId(exerciseId)
+                    ?: error("Unsupported exercise_id: "+exerciseId)
+                val generic=AnalysisConfigResolver.resolve(
+                    selected.definition,
+                    selected.profile,
+                    selected.equipment,
+                )
+                calibrationLifecycle.resetTarget(generic)
+            }.getOrDefault(false)
+            onCompleted(result)
+        }
     }
 
     override fun clearPersonalCalibration(onCompleted:(Boolean)->Unit){
