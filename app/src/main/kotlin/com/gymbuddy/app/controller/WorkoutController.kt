@@ -5,6 +5,7 @@ import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
 import com.gymbuddy.app.runtime.WorkoutRuntimeSnapshot
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
+import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
 import com.gymbuddy.domain.persistence.RestCheckpointDraft
@@ -45,7 +46,13 @@ class WorkoutController(
 
     init{
         runtime.loadRestCheckpoint{checkpoint->
-            if(checkpoint!=null)restoreRestCheckpoint(checkpoint)
+            if(checkpoint!=null){
+                restoreRestCheckpoint(checkpoint)
+            }else{
+                runtime.loadActiveSetRecovery{recovery->
+                    if(recovery!=null)restoreActiveSetRecovery(recovery)
+                }
+            }
         }
     }
 
@@ -261,6 +268,72 @@ class WorkoutController(
     }
 
     @Synchronized
+    private fun restoreActiveSetRecovery(recovery:ActiveSetRecovery){
+        if(newExerciseStarted||_uiState.value !is WorkoutUiState.ExerciseSelection)return
+        val bundle=InitialExerciseProfiles.resolveByExternalId(recovery.execution.exerciseId)?:return
+        runtime.resumeExercise(recovery.session,recovery.execution)
+        selectedExerciseId=recovery.execution.exerciseId
+        actualLoad=recovery.set.actualLoad
+        completedSets.clear()
+        latestCue=null
+        endingSet=false
+
+        if(recovery.finalized){
+            setNumber=recovery.set.setOrdinal
+            currentRepCount=recovery.committedReps
+            val restStarted=clock.nowEpochMs()
+            val checkpoint=RestCheckpoint(
+                session=recovery.session,
+                execution=recovery.execution,
+                completedSet=recovery.set,
+                previousReps=recovery.committedReps,
+                focus="Repeat the same setup.",
+                plannedNextLoad=recovery.set.actualLoad,
+                restStartedAtEpochMs=restStarted,
+            )
+            restCheckpoint=checkpoint
+            lastCompletedSetId=recovery.set.setId
+            completedSets+=CompletedSetUiState(
+                setNumber=recovery.set.setOrdinal,
+                reps=recovery.committedReps,
+                actualLoadText=formatLoadDisplay(recovery.set.actualLoad),
+                focus=checkpoint.focus,
+            )
+            _uiState.value=WorkoutUiState.Rest(
+                exerciseId=recovery.execution.exerciseId,
+                exerciseName=bundle.definition.displayName,
+                completedSetNumber=recovery.set.setOrdinal,
+                previousReps=recovery.committedReps,
+                previousActualLoadText=formatLoadDisplay(recovery.set.actualLoad),
+                focus=checkpoint.focus,
+                plannedNextLoadText=formatLoadInput(recovery.set.actualLoad),
+                restStartedAtEpochMs=restStarted,
+            )
+            runtime.saveRestCheckpoint(checkpoint.toDraft())
+            return
+        }
+
+        val recoveredAt=clock.nowEpochMs()
+        runtime.markActiveSetInterrupted(
+            recovery.set.setId,
+            recoveredAt,
+            recovery.committedReps,
+        )
+        setNumber=recovery.set.setOrdinal+1
+        currentRepCount=0
+        restCheckpoint=null
+        lastCompletedSetId=null
+        runtime.beginSet(setNumber,actualLoad)
+        _uiState.value=WorkoutUiState.CameraSetup(
+            exerciseId=recovery.execution.exerciseId,
+            exerciseName=bundle.definition.displayName,
+            instruction="Previous set was interrupted. Recheck the phone position.",
+            readiness=CameraReadinessUi.SETTING_UP,
+            setNumber=setNumber,
+        )
+    }
+
+    @Synchronized
     private fun restoreRestCheckpoint(checkpoint:RestCheckpoint){
         if(newExerciseStarted||_uiState.value !is WorkoutUiState.ExerciseSelection)return
         val bundle=InitialExerciseProfiles.resolveByExternalId(checkpoint.execution.exerciseId)?:return
@@ -289,6 +362,10 @@ class WorkoutController(
             plannedNextLoadText=formatLoadInput(checkpoint.plannedNextLoad),
             restStartedAtEpochMs=checkpoint.restStartedAtEpochMs,
         )
+    }
+
+    fun resetPersonalCalibration(onCompleted:(Boolean)->Unit={}){
+        runtime.clearPersonalCalibration(onCompleted)
     }
 
     fun close(){runtime.close()}
