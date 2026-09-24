@@ -37,13 +37,15 @@ class RoomPersonalCalibrationLifecycle(
             beforeEndedAtUs=summary.endedAtUs,
             limit=historyLimit-1,
         )
+        val current=safeActive()
+        val alreadyAccepted=current?.evidenceReferences.orEmpty()
         val sessions=(listOf(setId)+priorIds)
             .mapNotNull{candidateId->
                 evidenceRepository.loadSet(candidateId)
                     ?.toCalibrationSession(config,targetKey,supportedMetricIds)
             }
+            .filter{it.evidenceReference !in alreadyAccepted}
 
-        val current=safeActive()
         val proposal=updater.propose(
             calibrationProfileId=current?.calibrationProfileId?:DEFAULT_PROFILE_ID,
             currentProfile=current,
@@ -57,8 +59,13 @@ class RoomPersonalCalibrationLifecycle(
         return candidate
     }
 
-    fun resetTarget(config:AnalysisConfig):PersonalCalibrationProfile?{
-        val current=safeActive()?:return null
+    fun resetTarget(config:AnalysisConfig):Boolean{
+        val current=try{
+            calibrationRepository.loadActive()
+        }catch(_:Throwable){
+            calibrationRepository.clearActive()
+            return true
+        }?:return true
         val key=ExerciseBaselineKey(
             exerciseProfileId=config.exerciseProfile.profileId,
             exerciseProfileVersion=config.exerciseProfile.profileVersion,
@@ -67,7 +74,7 @@ class RoomPersonalCalibrationLifecycle(
         )
         val reset=updater.resetTargetBaseline(current,key)
         if(reset!==current)calibrationRepository.saveActive(reset)
-        return reset
+        return true
     }
 
     private fun safeActive():PersonalCalibrationProfile?=
