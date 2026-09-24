@@ -5,6 +5,7 @@ import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
 import com.gymbuddy.app.runtime.WorkoutRuntimeSnapshot
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
+import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
@@ -142,6 +143,46 @@ class WorkoutControllerTest {
     }
 
     @Test
+    fun interruptedActiveSetIsExplicitlyMarkedAndRestartsThroughCameraSetup(){
+        val recovery=ActiveSetRecovery(
+            session=WorkoutSessionRecord("session",100L),
+            execution=ExerciseExecutionRecord("exec","session","smith_machine_squat",100L),
+            set=SetRecord("interrupted","exec",1,200L,LoadSnapshot(40.0,"lb")),
+            committedReps=3,
+            finalized=false,
+        )
+        val runtime=FakeRuntime(activeRecovery=recovery)
+        val controller=WorkoutController(runtime,WorkoutDay.LEGS,WorkoutClock{50_000L})
+
+        val state=controller.uiState.value as WorkoutUiState.CameraSetup
+        assertEquals(2,state.setNumber)
+        assertEquals("smith_machine_squat",state.exerciseId)
+        assertEquals(listOf(2 to LoadSnapshot(40.0,"lb")),runtime.sets)
+        assertEquals(Triple("interrupted",50_000L,3),runtime.markedInterrupted)
+        assertEquals("exec",runtime.resumedExecutionId)
+    }
+
+    @Test
+    fun finalizedSetPendingRestRecoversIntoRestWithoutStartingDuplicateSet(){
+        val recovery=ActiveSetRecovery(
+            session=WorkoutSessionRecord("session",100L),
+            execution=ExerciseExecutionRecord("exec","session","smith_machine_squat",100L),
+            set=SetRecord("finalized","exec",1,200L,LoadSnapshot(40.0,"lb")),
+            committedReps=5,
+            finalized=true,
+        )
+        val runtime=FakeRuntime(activeRecovery=recovery)
+        val controller=WorkoutController(runtime,WorkoutDay.LEGS,WorkoutClock{60_000L})
+
+        val rest=controller.uiState.value as WorkoutUiState.Rest
+        assertEquals(5,rest.previousReps)
+        assertEquals("40 lb",rest.previousActualLoadText)
+        assertEquals(60_000L,rest.restStartedAtEpochMs)
+        assertTrue(runtime.sets.isEmpty())
+        assertEquals("finalized",runtime.savedRest.single().completedSetId)
+    }
+
+    @Test
     fun askChatGptExportsMostRecentRestoredSetFromSummary(){
         val runtime=FakeRuntime(
             restToLoad=checkpoint(
@@ -178,6 +219,7 @@ class WorkoutControllerTest {
 
     private class FakeRuntime(
         private val restToLoad:RestCheckpoint?=null,
+        private val activeRecovery:ActiveSetRecovery?=null,
     ):WorkoutRuntimeGateway{
         val exercises=mutableListOf<String>()
         val sets=mutableListOf<Pair<Int,LoadSnapshot?>>()
@@ -185,6 +227,7 @@ class WorkoutControllerTest {
         var endedSets=0
         var resumedExecutionId:String?=null
         var exportedSetId:String?=null
+        var markedInterrupted:Triple<String,Long,Int>?=null
         private var currentExercise="incline_dumbbell_press"
         private var currentSetOrdinal=1
         private var currentLoad:LoadSnapshot?=null
@@ -232,7 +275,23 @@ class WorkoutControllerTest {
             onLoaded(restToLoad)
         }
 
+        override fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit){
+            onLoaded(activeRecovery)
+        }
+
+        override fun markActiveSetInterrupted(
+            setId:String,
+            recoveredAtEpochMs:Long,
+            committedReps:Int,
+        ){
+            markedInterrupted=Triple(setId,recoveredAtEpochMs,committedReps)
+        }
+
         override fun clearRestCheckpoint()=Unit
+
+        override fun clearPersonalCalibration(onCompleted:(Boolean)->Unit){
+            onCompleted(true)
+        }
 
         override fun exportChatGptContext(
             currentSetId:String,
