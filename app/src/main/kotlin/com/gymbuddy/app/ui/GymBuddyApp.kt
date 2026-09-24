@@ -20,8 +20,8 @@ fun GymBuddyApp(
     onNextSet:()->Unit,
     onFinishExercise:()->Unit,
     onAskChatGpt:()->Unit,
-    onResetCalibration:()->Unit,
     onReturnToExercises:()->Unit,
+    onResetCalibration:()->Unit={},
 ){
     LaunchedEffect(state.requiresCamera){
         onCameraNeededChanged(state.requiresCamera)
