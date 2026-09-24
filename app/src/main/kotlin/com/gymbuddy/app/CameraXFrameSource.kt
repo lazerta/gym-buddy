@@ -14,6 +14,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
+import com.gymbuddy.app.runtime.CameraMotionContinuityEstimator
+import com.gymbuddy.app.runtime.CameraMotionSampler
+import com.gymbuddy.app.runtime.CameraMotionSignalStore
 import com.gymbuddy.frames.FrameConsumer
 import com.gymbuddy.frames.FrameOrigin
 import com.gymbuddy.frames.FramePacket
@@ -21,12 +24,14 @@ import com.gymbuddy.frames.FrameSource
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicLong
 
-class CameraXFrameSource(
+internal class CameraXFrameSource(
     private val context:Context,
     private val lifecycleOwner:LifecycleOwner,
     private val analysisExecutor:Executor,
     private val cameraSelector:CameraSelector=CameraSelector.DEFAULT_BACK_CAMERA,
     private val previewSurfaceProvider:Preview.SurfaceProvider?=null,
+    private val cameraMotionSignals:CameraMotionSignalStore?=null,
+    private val cameraMotionEstimator:CameraMotionContinuityEstimator=CameraMotionContinuityEstimator(),
 ):FrameSource<MPImage>{
 
     override val origin:FrameOrigin=FrameOrigin.CAMERA
@@ -46,6 +51,8 @@ class CameraXFrameSource(
 
         running=true
         frameIds.set(0L)
+        cameraMotionEstimator.reset()
+        cameraMotionSignals?.clear()
 
         val future=ProcessCameraProvider.getInstance(context)
         future.addListener(
@@ -89,6 +96,8 @@ class CameraXFrameSource(
 
     override fun stop(){
         running=false
+        cameraMotionEstimator.reset()
+        cameraMotionSignals?.clear()
         val analysis=analysisUseCase
         val preview=previewUseCase
         analysisUseCase=null
@@ -112,6 +121,10 @@ class CameraXFrameSource(
             val bitmap=rgbaBitmap(proxy)
             val image=BitmapImageBuilder(bitmap).build()
             val timestampUs=proxy.imageInfo.timestamp/1_000L
+            cameraMotionSignals?.publish(
+                timestampUs,
+                cameraMotionEstimator.update(CameraMotionSampler.sample(bitmap)),
+            )
             consumer.onFrame(
                 FramePacket(
                     frameId=frameIds.getAndIncrement(),
