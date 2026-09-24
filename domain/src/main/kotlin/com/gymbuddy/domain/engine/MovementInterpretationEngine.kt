@@ -21,10 +21,19 @@ class MovementInterpretationEngine(
     private val config: AnalysisConfig,
     private val signalExtractor: MovementSignalExtractor = MovementSignalExtractor(),
     private val primitiveInterpreter: MovementPrimitiveInterpreter = MovementPrimitiveInterpreter(),
-    private val repDetector: TemporalRepDetector = TemporalRepDetector(stepConfigs = RepDetectorConfig.fromSequence(config.exerciseProfile.movementPrimitiveSequence)),
+    private val repDetector: TemporalRepDetector = TemporalRepDetector(
+        stepConfigs = RepDetectorConfig.fromSequence(
+            config.exerciseProfile.movementPrimitiveSequence
+        )
+    ),
     private val evidenceBuilder: RepEvidenceBuilder = RepEvidenceBuilder(),
     private val formEngine: FormAnalysisEngine = FormAnalysisEngine(),
-    private val cueEngine: CueEngine = CueEngine(config.exerciseProfile.cuePolicy, config.exerciseProfile.formRuleSet),
+    private val idNamespace:String?=null,
+    private val cueEngine: CueEngine = CueEngine(
+        config.exerciseProfile.cuePolicy,
+        config.exerciseProfile.formRuleSet,
+        idNamespace,
+    ),
 ) {
     private val signalHistory = ArrayDeque<MovementSignalFrame>()
     private var lastTimestampUs: Long? = null
@@ -42,19 +51,27 @@ class MovementInterpretationEngine(
         val last = lastTimestampUs
         if (last != null && timestampUs <= last) return pausedOutput(timestampUs)
         lastTimestampUs = timestampUs
-        val signals = signalExtractor.extract(timestampUs, pose, resolvedSignalProfile())
+        val signals = signalExtractor.extract(
+            timestampUs,pose,resolvedSignalProfile()
+        )
         signalHistory.add(signals)
         while (signalHistory.size > 1500) signalHistory.removeFirst()
-        val primitives = primitiveInterpreter.interpret(signals, config.exerciseProfile.movementPrimitiveSequence)
+        val primitives = primitiveInterpreter.interpret(
+            signals,config.exerciseProfile.movementPrimitiveSequence
+        )
         val repEvents = repDetector.update(primitives)
         val evidence = mutableListOf<RepEvidence>()
         val forms = mutableListOf<FormObservation>()
         val cues = mutableListOf<CueEvent>()
         val responses = mutableListOf<CueResponse>()
         val snapshot = signalHistory.toList()
-        val completed = repEvents.filter { it.kind == RepCompletionKind.COMPLETED }
+        val completed = repEvents.filter {
+            it.kind == RepCompletionKind.COMPLETED
+        }
         completed.forEach { event ->
-            val rep = evidenceBuilder.build(event, snapshot, config, idNamespace)
+            val rep = evidenceBuilder.build(
+                event,snapshot,config,idNamespace
+            )
             val obs = formEngine.analyze(rep, config)
             val cueDecision = cueEngine.evaluate(rep, obs)
             evidence += rep
@@ -63,8 +80,16 @@ class MovementInterpretationEngine(
             responses += cueDecision.responses
         }
         val through = completed.maxOfOrNull { it.completedAtUs }
-        if (through != null) while (signalHistory.isNotEmpty() && signalHistory.first().timestampUs <= through) signalHistory.removeFirst()
-        return MovementEngineOutput(timestampUs, signals, primitives, repEvents, evidence, forms, cues, responses, paused = false)
+        if (through != null) {
+            while (
+                signalHistory.isNotEmpty() &&
+                signalHistory.first().timestampUs <= through
+            ) signalHistory.removeFirst()
+        }
+        return MovementEngineOutput(
+            timestampUs, signals, primitives, repEvents, evidence,
+            forms, cues, responses, paused = false
+        )
     }
 
     fun onInterruption(timestampUs: Long): MovementEngineOutput {
@@ -76,13 +101,24 @@ class MovementInterpretationEngine(
         primitiveInterpreter.reset()
         signalHistory.clear()
         cueEngine.onInterruption()
-        return MovementEngineOutput(timestampUs, null, null, invalid, emptyList(), emptyList(), emptyList(), emptyList(), paused = true)
+        return MovementEngineOutput(
+            timestampUs,null,null,invalid,emptyList(),emptyList(),
+            emptyList(),emptyList(),paused=true
+        )
     }
 
-    private fun resolvedSignalProfile() = config.exerciseProfile.signalProfile.copy(
-        definitions = config.exerciseProfile.signalProfile.definitions.map { d ->
-            d.copy(parameters = config.resolvedSignalParameters[d.signalId] ?: d.parameters)
-        }
+    private fun resolvedSignalProfile() =
+        config.exerciseProfile.signalProfile.copy(
+            definitions = config.exerciseProfile.signalProfile.definitions.map { d ->
+                d.copy(
+                    parameters = config.resolvedSignalParameters[d.signalId]
+                        ?: d.parameters
+                )
+            }
+        )
+
+    private fun pausedOutput(ts: Long) = MovementEngineOutput(
+        ts,null,null,emptyList(),emptyList(),emptyList(),emptyList(),
+        emptyList(),paused=true
     )
-    private fun pausedOutput(ts: Long) = MovementEngineOutput(ts,null,null,emptyList(),emptyList(),emptyList(),emptyList(),emptyList(),paused=true)
 }
