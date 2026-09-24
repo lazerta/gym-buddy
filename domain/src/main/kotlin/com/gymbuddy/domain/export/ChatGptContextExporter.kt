@@ -68,23 +68,25 @@ class ChatGptContextExporter(
         val currentSummary=requireNotNull(current.evidence.summary){
             "current set must be finalized before export"
         }
+        val currentChronology=chronology(currentSummary)
         val history=repository.loadRecentComparableSetContexts(
             exerciseId=current.execution.exerciseId,
             currentSetId=currentSetId,
-            beforeEndedAtUs=currentSummary.endedAtUs,
+            beforeEndedAtUs=currentChronology,
             limit=historyLimit,
         )
             .filter{it.execution.exerciseId==current.execution.exerciseId}
             .filter{it.evidence.set.setId!=currentSetId}
             .filter{context->
                 val summary=context.evidence.summary?:return@filter false
-                summary.endedAtUs<currentSummary.endedAtUs||
-                    (summary.endedAtUs==currentSummary.endedAtUs&&
+                val order=chronology(summary)
+                order<currentChronology||
+                    (order==currentChronology&&
                         context.evidence.set.setId<currentSetId)
             }
             .sortedWith(
                 compareByDescending<ChatGptSetContext>{
-                    requireNotNull(it.evidence.summary).endedAtUs
+                    chronology(requireNotNull(it.evidence.summary))
                 }.thenByDescending{it.evidence.set.setId}
             )
             .take(historyLimit)
@@ -131,11 +133,14 @@ class ChatGptContextExporter(
                 "set_id" to str(evidence.set.setId),
             ),
             "session_started_at_us" to num(context.session.startedAtUs),
+            "session_started_at_epoch_ms" to num(context.session.startedAtEpochMs),
             "execution_started_at_us" to num(context.execution.startedAtUs),
+            "execution_started_at_epoch_ms" to num(context.execution.startedAtEpochMs),
             "exercise_id" to str(context.execution.exerciseId),
             "set" to obj(
                 "ordinal" to num(evidence.set.setOrdinal),
                 "started_at_us" to num(evidence.set.startedAtUs),
+                "started_at_epoch_ms" to num(evidence.set.startedAtEpochMs),
                 "actual_load" to load(evidence.set.actualLoad),
                 "summary" to setSummary(evidence.summary),
                 "tracking" to tracking(evidence.tracking),
@@ -268,6 +273,7 @@ class ChatGptContextExporter(
         summary?.let{
             obj(
                 "ended_at_us" to num(it.endedAtUs),
+                "ended_at_epoch_ms" to num(it.endedAtEpochMs),
                 "completed_reps" to num(it.completedReps),
                 "assisted_reps" to num(it.assistedReps),
                 "uncertain_reps" to num(it.uncertainReps),
@@ -281,8 +287,19 @@ class ChatGptContextExporter(
                 "degraded_frames" to num(it.degradedFrames),
                 "paused_frames" to num(it.pausedFrames),
                 "unknown_frames" to num(it.unknownFrames),
+                "active_observable_frames" to num(it.activeObservableFrames),
+                "active_degraded_frames" to num(it.activeDegradedFrames),
+                "active_paused_frames" to num(it.activePausedFrames),
+                "active_unknown_frames" to num(it.activeUnknownFrames),
+                "interruption_episodes" to num(it.interruptionEpisodes),
+                "camera_disturbance_episodes" to num(it.cameraDisturbanceEpisodes),
+                "observed_view_class" to str(it.observedViewClass?.name),
+                "active_frame_fill_mean" to num(it.activeFrameFillMean),
             )
         }?:"null"
+
+    private fun chronology(summary:SetSummary):Long =
+        summary.endedAtEpochMs.takeIf{it>0L}?:summary.endedAtUs
 
     private fun externalContext(context:ChatGptContextReference?):String=
         context?.let{
