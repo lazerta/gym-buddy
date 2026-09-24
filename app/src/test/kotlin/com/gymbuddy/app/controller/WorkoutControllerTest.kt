@@ -289,6 +289,13 @@ class WorkoutControllerTest {
 
         override fun clearRestCheckpoint()=Unit
 
+        override fun resetPersonalCalibration(
+            exerciseId:String,
+            onCompleted:(Boolean)->Unit,
+        ){
+            onCompleted(true)
+        }
+
         override fun clearPersonalCalibration(onCompleted:(Boolean)->Unit){
             onCompleted(true)
         }
