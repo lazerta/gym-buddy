@@ -19,7 +19,7 @@ data class ProductionPipelineResult(
     val movement: MovementEngineOutput,
     val cameraGuidance: CameraGuidanceAction,
     val lifecycleState: SetLifecycleState,
-    val observedViewClass: ViewClass?,
+    val observedViewClass: ViewClass?=null,
 )
 
 class ProductionMovementPipeline(
@@ -27,13 +27,17 @@ class ProductionMovementPipeline(
     private val subjectLock: PrimarySubjectLock = PrimarySubjectLock(),
     private val trackingGate: TrackingQualityGate = TrackingQualityGate(),
     private val normalizer: CoordinateNormalizer = CoordinateNormalizer(),
-    private val evidenceIdNamespace:String?=null,
-    private val engine: MovementInterpretationEngine =
-        MovementInterpretationEngine(config,idNamespace=evidenceIdNamespace),
+    engine: MovementInterpretationEngine? = null,
     private val cameraGuidanceEngine: CameraGuidanceEngine = CameraGuidanceEngine(),
     private val lifecycle: SetLifecycleController = SetLifecycleController(),
     private val viewEstimator: PoseViewEstimator = PoseViewEstimator(),
+    private val evidenceIdNamespace:String?=null,
 ) {
+    private val engine:MovementInterpretationEngine =
+        engine ?: MovementInterpretationEngine(
+            config,
+            idNamespace=evidenceIdNamespace,
+        )
     private var lastFrameTimestampUs: Long? = null
     private var lastLock = PrimarySubjectLockResult(
         PrimarySubjectLockState.TARGET_LOST,null,null,null,0
