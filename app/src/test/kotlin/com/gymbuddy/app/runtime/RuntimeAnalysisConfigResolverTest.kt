@@ -58,6 +58,23 @@ class RuntimeAnalysisConfigResolverTest {
         assertNull(config.provenance.personalCalibrationProfile)
     }
 
+    @Test
+    fun corruptStoredCalibrationFallsBackToGenericCoach(){
+        val bundle=InitialExerciseProfiles.inclineDumbbellPress
+        var rejected:Throwable?=null
+        val resolver=RuntimeAnalysisConfigResolver(
+            loadCalibration={throw IllegalStateException("corrupt calibration")},
+            onCalibrationRejected={rejected=it},
+        )
+
+        val config=resolver.resolve(bundle)
+
+        assertNull(config.personalCalibrationProfile)
+        assertNull(config.activeExerciseBaseline)
+        assertNull(config.provenance.personalCalibrationProfile)
+        assertEquals("corrupt calibration",rejected?.message)
+    }
+
     private class FakeCalibrationRepository(
         private val profile:PersonalCalibrationProfile?,
     ):PersonalCalibrationRepository{
