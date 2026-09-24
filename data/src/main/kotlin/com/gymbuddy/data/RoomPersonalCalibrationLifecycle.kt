@@ -92,14 +92,15 @@ class RoomPersonalCalibrationLifecycle(
         val current=safeActive()
         val accepted=current?.evidenceReferences.orEmpty()
 
-        val aggregates=sessionIds.mapNotNull{sessionId->
+        val allAggregates=sessionIds.mapNotNull{sessionId->
             toSessionAggregate(
                 sessionId=sessionId,
                 config=config,
                 targetKey=targetKey,
                 supportedMetricIds=supportedMetricIds,
             )
-        }.filterNot{aggregate->
+        }
+        val movementAggregates=allAggregates.filterNot{aggregate->
             aggregate.evidence.evidenceReference in accepted||
                 aggregate.setIds.any{("set:"+it) in accepted}
         }
@@ -109,7 +110,7 @@ class RoomPersonalCalibrationLifecycle(
             currentProfile=current,
             targetKey=targetKey,
             supportedMetricIds=supportedMetricIds,
-            sessions=aggregates.map{it.evidence},
+            sessions=movementAggregates.map{it.evidence},
         )
         val movementCandidate=
             if(proposal.status==CalibrationUpdateStatus.PROPOSED){
@@ -123,7 +124,7 @@ class RoomPersonalCalibrationLifecycle(
         val combined=applyCameraPrior(
             base=movementCandidate,
             current=current,
-            aggregates=aggregates,
+            aggregates=allAggregates,
             config=config,
             actualView=actualView,
             keepBaseVersion=movementChanged,
@@ -308,9 +309,13 @@ class RoomPersonalCalibrationLifecycle(
         actualView:ViewClass,
         keepBaseVersion:Boolean,
     ):PersonalCalibrationProfile?{
+        val alreadyAccepted=base?.evidenceReferences.orEmpty()
         val eligible=aggregates.filter{
+            val cameraRef="camera-session:"+
+                it.evidence.evidenceReference.removePrefix("movement-session:")
             it.evidence.eligibility==CalibrationSessionEligibility.ELIGIBLE&&
-                it.frameFill!=null
+                it.frameFill!=null&&
+                cameraRef !in alreadyAccepted
         }
         if(eligible.size<policy.cameraPriorMinimumSessions)return base
 
