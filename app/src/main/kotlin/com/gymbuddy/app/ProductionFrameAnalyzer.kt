@@ -8,9 +8,9 @@ import com.gymbuddy.frames.FramePacket
 
 class ProductionFrameAnalyzer(
     private val poseAnalyzer: MediaPipePoseAnalyzer,
-    private val processorFactory: (PoseFrame) -> ProductionPoseFrameProcessor,
     private val observationContextProvider: (FramePacket<MPImage>) -> TrackingObservationContext =
         { TrackingObservationContext() },
+    private val processorFactory: (PoseFrame) -> ProductionPoseFrameProcessor,
 ) : FrameAnalyzer<MPImage, ProductionFrameResult> {
     private var processor: ProductionPoseFrameProcessor? = null
     private var lastTimestampUs: Long? = null
