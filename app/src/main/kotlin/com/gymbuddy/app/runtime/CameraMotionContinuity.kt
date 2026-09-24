@@ -39,7 +39,7 @@ internal object CameraMotionSampler{
         borderFraction:Double=.25,
     ):CameraMotionSample{
         require(columns>=4&&rows>=4)
-        require(borderFraction in .10.. .45)
+        require(borderFraction in 0.10..0.45)
         val values=ArrayList<Int>(columns*rows)
         for(row in 0 until rows){
             val y=((row+.5)*bitmap.height/rows).toInt().coerceIn(0,bitmap.height-1)
