@@ -263,8 +263,8 @@ class RoomPersonalCalibrationLifecycle(
         }){
             return CalibrationSessionEligibility.FORM_DEVIATION
         }
-        if(sets.any{set->
-            set.observations.any{it.state==FormObservationState.UNKNOWN}
+        if(sets.flatMap{it.observations}.none{
+            it.state==FormObservationState.OK
         }){
             return CalibrationSessionEligibility.OBSERVABILITY_POOR
         }
