@@ -19,8 +19,8 @@ import com.gymbuddy.app.controller.WorkoutUiState
 fun ExerciseSummaryScreen(
     state:WorkoutUiState.Summary,
     onAskChatGpt:()->Unit,
-    onResetCalibration:()->Unit,
     onReturnToExercises:()->Unit,
+    onResetCalibration:()->Unit={},
 ){
     Column(
         modifier=Modifier.fillMaxSize().padding(24.dp),
