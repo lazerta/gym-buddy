@@ -16,12 +16,15 @@ class RoomChatGptContextRepository(
         val session=dao.session(execution.sessionId)?:return null
         val evidence=evidenceRepository.loadSet(setId)?:return null
         return ChatGptSetContext(
-            session=WorkoutSessionRecord(session.sessionId,session.startedAtUs),
+            session=WorkoutSessionRecord(
+                session.sessionId,session.startedAtUs,session.startedAtEpochMs
+            ),
             execution=ExerciseExecutionRecord(
                 execution.executionId,
                 execution.sessionId,
                 execution.exerciseId,
                 execution.startedAtUs,
+                execution.startedAtEpochMs,
             ),
             evidence=evidence,
         )
@@ -30,17 +33,17 @@ class RoomChatGptContextRepository(
     override fun loadRecentComparableSetContexts(
         exerciseId:String,
         currentSetId:String,
-        beforeEndedAtUs:Long,
+        beforeEndedAtEpochMs:Long,
         limit:Int,
     ):List<ChatGptSetContext>{
         require(exerciseId.isNotBlank())
         require(currentSetId.isNotBlank())
-        require(beforeEndedAtUs>=0L)
+        require(beforeEndedAtEpochMs>=0L)
         require(limit>0)
         return dao.recentComparableSetIds(
             exerciseId=exerciseId,
             currentSetId=currentSetId,
-            beforeEndedAtUs=beforeEndedAtUs,
+            beforeEndedAtEpochMs=beforeEndedAtEpochMs,
             limit=limit,
         ).mapNotNull(::loadSetContext)
     }

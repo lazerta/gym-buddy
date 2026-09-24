@@ -21,6 +21,7 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutFlowState(e:WorkoutFlowStateEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertInterruptedSet(e:InterruptedSetEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertPersonalCalibration(e:PersonalCalibrationProfileEntity)
+    @Insert(onConflict=OnConflictStrategy.IGNORE) abstract fun insertPersonalCalibrationHistory(e:PersonalCalibrationProfileHistoryEntity):Long
 
     @Query("SELECT * FROM workout_sessions WHERE sessionId=:id") abstract fun session(id:String):WorkoutSessionEntity?
     @Query("SELECT * FROM exercise_executions WHERE executionId=:id") abstract fun execution(id:String):ExerciseExecutionEntity?
@@ -40,6 +41,7 @@ import androidx.room.*
     @Query("SELECT d.* FROM cue_deliveries d JOIN cue_events c ON c.cueId=d.cueId WHERE c.setId=:id ORDER BY c.emittedAtUs, d.cueId") abstract fun deliveriesForSet(id:String):List<CueDeliveryEntity>
     @Query("SELECT * FROM tracking_quality_summaries WHERE setId=:id") abstract fun trackingSummary(id:String):TrackingQualitySummaryEntity?
     @Query("SELECT * FROM set_summaries WHERE setId=:id") abstract fun setSummary(id:String):SetSummaryEntity?
+
     @Query("""
         SELECT s.setId
         FROM sets s
@@ -48,23 +50,62 @@ import androidx.room.*
         WHERE e.exerciseId=:exerciseId
           AND s.setId!=:currentSetId
           AND (
-              ss.endedAtUs<:beforeEndedAtUs OR
-              (ss.endedAtUs=:beforeEndedAtUs AND s.setId<:currentSetId)
+              (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)<:beforeEndedAtEpochMs OR
+              ((CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)=:beforeEndedAtEpochMs AND s.setId<:currentSetId)
           )
-        ORDER BY ss.endedAtUs DESC, s.setId DESC
+        ORDER BY (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END) DESC, s.setId DESC
         LIMIT :limit
     """)
     abstract fun recentComparableSetIds(
         exerciseId:String,
         currentSetId:String,
-        beforeEndedAtUs:Long,
+        beforeEndedAtEpochMs:Long,
         limit:Int,
     ):List<String>
+
+    @Query("""
+        SELECT ws.sessionId
+        FROM workout_sessions ws
+        JOIN exercise_executions e ON e.sessionId=ws.sessionId
+        JOIN sets s ON s.executionId=e.executionId
+        JOIN set_summaries ss ON ss.setId=s.setId
+        WHERE e.exerciseId=:exerciseId
+          AND ws.sessionId!=:currentSessionId
+          AND (
+              (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)<:beforeSessionStartedAtEpochMs OR
+              ((CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)=:beforeSessionStartedAtEpochMs AND ws.sessionId<:currentSessionId)
+          )
+        GROUP BY ws.sessionId
+        ORDER BY (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END) DESC, ws.sessionId DESC
+        LIMIT :limit
+    """)
+    abstract fun recentComparableSessionIds(
+        exerciseId:String,
+        currentSessionId:String,
+        beforeSessionStartedAtEpochMs:Long,
+        limit:Int,
+    ):List<String>
+
+    @Query("""
+        SELECT s.setId
+        FROM sets s
+        JOIN exercise_executions e ON e.executionId=s.executionId
+        JOIN set_summaries ss ON ss.setId=s.setId
+        WHERE e.sessionId=:sessionId
+          AND e.exerciseId=:exerciseId
+        ORDER BY (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END), s.setOrdinal, s.setId
+    """)
+    abstract fun completedSetIdsForSessionExercise(
+        sessionId:String,
+        exerciseId:String,
+    ):List<String>
+
     @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:checkpointId AND completedSetId=:setId") abstract fun deleteWorkoutFlowStateForSet(checkpointId:String,setId:String)
     @Query("SELECT * FROM interrupted_sets WHERE setId=:setId") abstract fun interruptedSet(setId:String):InterruptedSetEntity?
     @Query("SELECT * FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun personalCalibration(slotId:String):PersonalCalibrationProfileEntity?
+    @Query("SELECT * FROM personal_calibration_profile_history WHERE calibrationProfileId=:profileId AND profileVersion=:profileVersion") abstract fun personalCalibrationHistory(profileId:String,profileVersion:Int):PersonalCalibrationProfileHistoryEntity?
     @Query("DELETE FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun deletePersonalCalibration(slotId:String)
 
     @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){insertSet(s);insertAnalysisContext(c)}

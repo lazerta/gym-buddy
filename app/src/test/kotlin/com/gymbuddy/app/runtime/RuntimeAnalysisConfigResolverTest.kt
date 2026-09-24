@@ -75,6 +75,47 @@ class RuntimeAnalysisConfigResolverTest {
         assertEquals("corrupt calibration",rejected?.message)
     }
 
+    @Test
+    fun validLoadedCalibrationThatFailsContextMergeFallsBackGeneric(){
+        val bundle=InitialExerciseProfiles.inclineDumbbellPress
+        val equipment=requireNotNull(bundle.equipment)
+        fun baseline(id:String,view:com.gymbuddy.domain.profile.ViewClass?)=
+            ExerciseBaseline(
+                profileId=id,
+                profileVersion=1,
+                semanticHash=id+"-hash",
+                key=ExerciseBaselineKey(
+                    exerciseProfileId=bundle.profile.profileId,
+                    exerciseProfileVersion=bundle.profile.profileVersion,
+                    equipmentProfileId=equipment.profileId,
+                    viewClass=view,
+                ),
+                metricStatistics=mapOf(
+                    "bilateral_asymmetry" to
+                        BaselineStatistic(.14,.08,.20,30,3,.80)
+                ),
+            )
+        val calibration=PersonalCalibrationProfile.create(
+            calibrationProfileId="ambiguous-personal",
+            profileVersion=1,
+            sourceConfidence=.80,
+            exerciseBaselines=listOf(
+                baseline("generic-view",null),
+                baseline("preferred-view",bundle.profile.cameraProfile.preferredViewClass),
+            ),
+        )
+        var rejection:Throwable?=null
+        val config=RuntimeAnalysisConfigResolver(
+            loadCalibration={calibration},
+            onCalibrationRejected={rejection=it},
+        ).resolve(bundle)
+
+        assertNull(config.personalCalibrationProfile)
+        assertNull(config.activeExerciseBaseline)
+        assertNull(config.provenance.personalCalibrationProfile)
+        assertNotNull(rejection)
+    }
+
     private class FakeCalibrationRepository(
         private val profile:PersonalCalibrationProfile?,
     ):PersonalCalibrationRepository{

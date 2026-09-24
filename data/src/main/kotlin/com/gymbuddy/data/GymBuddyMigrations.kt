@@ -81,5 +81,53 @@ object GymBuddyMigrations {
         }
     }
 
-    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `workout_sessions` ADD COLUMN `startedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `exercise_executions` ADD COLUMN `startedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `startedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `set_summaries` ADD COLUMN `endedAtEpochMs` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeObservableFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeDegradedFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activePausedFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeUnknownFrames` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `interruptionEpisodes` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `cameraDisturbanceEpisodes` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `observedViewClass` TEXT")
+            db.execSQL("ALTER TABLE `tracking_quality_summaries` ADD COLUMN `activeFrameFillMean` REAL")
+        }
+    }
+
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `personal_calibration_profile_history` (
+                    `calibrationProfileId` TEXT NOT NULL,
+                    `profileVersion` INTEGER NOT NULL,
+                    `semanticHash` TEXT NOT NULL,
+                    `payload` TEXT NOT NULL,
+                    PRIMARY KEY(`calibrationProfileId`, `profileVersion`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                INSERT OR IGNORE INTO `personal_calibration_profile_history`
+                    (`calibrationProfileId`, `profileVersion`, `semanticHash`, `payload`)
+                SELECT `calibrationProfileId`, `profileVersion`, `semanticHash`, `payload`
+                FROM `personal_calibration_profiles`
+                """.trimIndent()
+            )
+        }
+    }
+
+    val ALL = arrayOf(
+        MIGRATION_1_2,
+        MIGRATION_2_3,
+        MIGRATION_3_4,
+        MIGRATION_4_5,
+        MIGRATION_5_6,
+        MIGRATION_6_7,
+    )
 }

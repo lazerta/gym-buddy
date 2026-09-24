@@ -183,6 +183,59 @@ class WorkoutControllerTest {
     }
 
     @Test
+    fun exerciseSelectionCannotErasePendingRecoveryMarker(){
+        val recovery=ActiveSetRecovery(
+            session=WorkoutSessionRecord("session",100L),
+            execution=ExerciseExecutionRecord(
+                "exec","session","smith_machine_squat",100L
+            ),
+            set=SetRecord("recover-me","exec",1,200L),
+            committedReps=2,
+            finalized=false,
+        )
+        val runtime=FakeRuntime(
+            activeRecovery=recovery,
+            delayRestLoad=true,
+        )
+        val controller=WorkoutController(
+            runtime,WorkoutDay.PUSH,WorkoutClock{70_000L}
+        )
+
+        controller.selectExercise("incline_dumbbell_press")
+        assertTrue(runtime.exercises.isEmpty())
+        assertTrue(runtime.sets.isEmpty())
+
+        runtime.completeRestLoad()
+
+        val state=controller.uiState.value as WorkoutUiState.CameraSetup
+        assertEquals("smith_machine_squat",state.exerciseId)
+        assertEquals(2,state.setNumber)
+        assertEquals(Triple("recover-me",70_000L,2),runtime.markedInterrupted)
+    }
+
+    @Test
+    fun summaryCalibrationResetTargetsCurrentExercise(){
+        val runtime=FakeRuntime(
+            restToLoad=checkpoint(
+                actual=LoadSnapshot(40.0,"lb"),
+                planned=LoadSnapshot(45.0,"lb"),
+                restStartedAt=123_000L,
+                reps=8,
+            )
+        )
+        val controller=WorkoutController(
+            runtime,WorkoutDay.LEGS,WorkoutClock{999_000L}
+        )
+        controller.finishExercise()
+
+        var success=false
+        controller.resetPersonalCalibration{success=it}
+
+        assertTrue(success)
+        assertEquals("smith_machine_squat",runtime.resetCalibrationExerciseId)
+    }
+
+    @Test
     fun askChatGptExportsMostRecentRestoredSetFromSummary(){
         val runtime=FakeRuntime(
             restToLoad=checkpoint(
@@ -220,6 +273,7 @@ class WorkoutControllerTest {
     private class FakeRuntime(
         private val restToLoad:RestCheckpoint?=null,
         private val activeRecovery:ActiveSetRecovery?=null,
+        private val delayRestLoad:Boolean=false,
     ):WorkoutRuntimeGateway{
         val exercises=mutableListOf<String>()
         val sets=mutableListOf<Pair<Int,LoadSnapshot?>>()
@@ -228,6 +282,8 @@ class WorkoutControllerTest {
         var resumedExecutionId:String?=null
         var exportedSetId:String?=null
         var markedInterrupted:Triple<String,Long,Int>?=null
+        var resetCalibrationExerciseId:String?=null
+        private var pendingRestCallback:((RestCheckpoint?)->Unit)?=null
         private var currentExercise="incline_dumbbell_press"
         private var currentSetOrdinal=1
         private var currentLoad:LoadSnapshot?=null
@@ -272,7 +328,14 @@ class WorkoutControllerTest {
         }
 
         override fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit){
-            onLoaded(restToLoad)
+            if(delayRestLoad)pendingRestCallback=onLoaded
+            else onLoaded(restToLoad)
+        }
+
+        fun completeRestLoad(){
+            val callback=requireNotNull(pendingRestCallback)
+            pendingRestCallback=null
+            callback(restToLoad)
         }
 
         override fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit){
@@ -293,6 +356,7 @@ class WorkoutControllerTest {
             exerciseId:String,
             onCompleted:(Boolean)->Unit,
         ){
+            resetCalibrationExerciseId=exerciseId
             onCompleted(true)
         }
 

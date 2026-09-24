@@ -38,6 +38,7 @@ class WorkoutController(
     private var endingSet=false
     private var lastCompletedSetId:String?=null
     private var selectedDay=initialDay
+    private var recoveryPending=true
     val currentDay:WorkoutDay
         @Synchronized get()=selectedDay
 
@@ -45,15 +46,7 @@ class WorkoutController(
     val uiState:StateFlow<WorkoutUiState> = _uiState.asStateFlow()
 
     init{
-        runtime.loadRestCheckpoint{checkpoint->
-            if(checkpoint!=null){
-                restoreRestCheckpoint(checkpoint)
-            }else{
-                runtime.loadActiveSetRecovery{recovery->
-                    if(recovery!=null)restoreActiveSetRecovery(recovery)
-                }
-            }
-        }
+        runtime.loadRestCheckpoint(::onRestCheckpointLoaded)
     }
 
     val analysisExecutor:Executor
@@ -63,6 +56,7 @@ class WorkoutController(
 
     @Synchronized
     fun selectDay(day:WorkoutDay){
+        if(recoveryPending)return
         selectedDay=day
         if(_uiState.value is WorkoutUiState.ExerciseSelection){
             _uiState.value=selectionState()
@@ -71,6 +65,7 @@ class WorkoutController(
 
     @Synchronized
     fun selectExercise(exerciseId:String){
+        if(recoveryPending)return
         val bundle=InitialExerciseProfiles.resolveByExternalId(exerciseId)
             ?: error("Unsupported exercise_id: $exerciseId")
         newExerciseStarted=true
@@ -265,6 +260,22 @@ class WorkoutController(
                 CameraReadinessUi.READY else CameraReadinessUi.SETTING_UP,
             setNumber=setNumber,
         )
+    }
+
+    @Synchronized
+    private fun onRestCheckpointLoaded(checkpoint:RestCheckpoint?){
+        if(checkpoint!=null){
+            recoveryPending=false
+            restoreRestCheckpoint(checkpoint)
+            return
+        }
+        runtime.loadActiveSetRecovery(::onActiveSetRecoveryLoaded)
+    }
+
+    @Synchronized
+    private fun onActiveSetRecoveryLoaded(recovery:ActiveSetRecovery?){
+        recoveryPending=false
+        if(recovery!=null)restoreActiveSetRecovery(recovery)
     }
 
     @Synchronized

@@ -68,6 +68,7 @@ class MainActivity:ComponentActivity(){
                 onAskChatGpt={
                     controller.askChatGpt(::handleChatGptExport)
                 },
+                onResetCalibration=::handleCalibrationReset,
                 onReturnToExercises=controller::returnToSelection,
             )
         }
@@ -82,6 +83,19 @@ class MainActivity:ComponentActivity(){
         cameraBridge.close()
         controller.close()
         super.onDestroy()
+    }
+
+    private fun handleCalibrationReset(){
+        controller.resetPersonalCalibration{success->
+            runOnUiThread{
+                Toast.makeText(
+                    this,
+                    if(success)"Calibration reset. It will rebuild from future workouts."
+                    else "Unable to reset calibration.",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
     }
 
     private fun handleChatGptExport(result:Result<String>){

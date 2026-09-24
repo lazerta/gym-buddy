@@ -20,6 +20,7 @@ fun ExerciseSummaryScreen(
     state:WorkoutUiState.Summary,
     onAskChatGpt:()->Unit,
     onReturnToExercises:()->Unit,
+    onResetCalibration:()->Unit={},
 ){
     Column(
         modifier=Modifier.fillMaxSize().padding(24.dp),
@@ -39,6 +40,10 @@ fun ExerciseSummaryScreen(
             modifier=Modifier.fillMaxWidth(),
             onClick=onAskChatGpt,
         ){Text("Ask ChatGPT")}
+        OutlinedButton(
+            modifier=Modifier.fillMaxWidth(),
+            onClick=onResetCalibration,
+        ){Text("Reset calibration")}
         Button(
             modifier=Modifier.fillMaxWidth(),
             onClick=onReturnToExercises,

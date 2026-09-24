@@ -6,15 +6,96 @@ import com.gymbuddy.domain.evidence.FormObservation
 import com.gymbuddy.domain.evidence.RepEvidence
 import com.gymbuddy.domain.profile.AnalysisConfig
 import com.gymbuddy.domain.profile.AnalysisProvenance
+import com.gymbuddy.domain.profile.ViewClass
 
 private fun requireId(value:String,field:String){require(value.isNotBlank()){ "$field must not be blank" }}
 private fun requireTimestamp(value:Long,field:String){require(value>=0L){ "$field must be >= 0" }}
 
-data class WorkoutSessionRecord(val sessionId:String,val startedAtUs:Long){init{requireId(sessionId,"sessionId");requireTimestamp(startedAtUs,"startedAtUs")}}
-data class ExerciseExecutionRecord(val executionId:String,val sessionId:String,val exerciseId:String,val startedAtUs:Long){init{requireId(executionId,"executionId");requireId(sessionId,"sessionId");requireId(exerciseId,"exerciseId");requireTimestamp(startedAtUs,"startedAtUs")}}
-data class SetRecord(val setId:String,val executionId:String,val setOrdinal:Int,val startedAtUs:Long,val actualLoad:LoadSnapshot?=null){init{requireId(setId,"setId");requireId(executionId,"executionId");require(setOrdinal>0);requireTimestamp(startedAtUs,"startedAtUs")}}
-data class TrackingQualitySummary(val setId:String,val observableFrames:Int,val degradedFrames:Int,val pausedFrames:Int,val unknownFrames:Int){init{requireId(setId,"setId");require(observableFrames>=0);require(degradedFrames>=0);require(pausedFrames>=0);require(unknownFrames>=0)}}
-data class SetSummary(val setId:String,val endedAtUs:Long,val completedReps:Int,val assistedReps:Int,val uncertainReps:Int){init{requireId(setId,"setId");requireTimestamp(endedAtUs,"endedAtUs");require(completedReps>=0);require(assistedReps>=0);require(uncertainReps>=0);require(assistedReps+uncertainReps<=completedReps)}}
+data class WorkoutSessionRecord(
+    val sessionId:String,
+    val startedAtUs:Long,
+    val startedAtEpochMs:Long=0L,
+){
+    init{
+        requireId(sessionId,"sessionId")
+        requireTimestamp(startedAtUs,"startedAtUs")
+        requireTimestamp(startedAtEpochMs,"startedAtEpochMs")
+    }
+}
+data class ExerciseExecutionRecord(
+    val executionId:String,
+    val sessionId:String,
+    val exerciseId:String,
+    val startedAtUs:Long,
+    val startedAtEpochMs:Long=0L,
+){
+    init{
+        requireId(executionId,"executionId")
+        requireId(sessionId,"sessionId")
+        requireId(exerciseId,"exerciseId")
+        requireTimestamp(startedAtUs,"startedAtUs")
+        requireTimestamp(startedAtEpochMs,"startedAtEpochMs")
+    }
+}
+data class SetRecord(
+    val setId:String,
+    val executionId:String,
+    val setOrdinal:Int,
+    val startedAtUs:Long,
+    val actualLoad:LoadSnapshot?=null,
+    val startedAtEpochMs:Long=0L,
+){
+    init{
+        requireId(setId,"setId")
+        requireId(executionId,"executionId")
+        require(setOrdinal>0)
+        requireTimestamp(startedAtUs,"startedAtUs")
+        requireTimestamp(startedAtEpochMs,"startedAtEpochMs")
+    }
+}
+data class TrackingQualitySummary(
+    val setId:String,
+    val observableFrames:Int,
+    val degradedFrames:Int,
+    val pausedFrames:Int,
+    val unknownFrames:Int,
+    val activeObservableFrames:Int=0,
+    val activeDegradedFrames:Int=0,
+    val activePausedFrames:Int=0,
+    val activeUnknownFrames:Int=0,
+    val interruptionEpisodes:Int=0,
+    val cameraDisturbanceEpisodes:Int=0,
+    val observedViewClass:ViewClass?=null,
+    val activeFrameFillMean:Double?=null,
+){
+    init{
+        requireId(setId,"setId")
+        listOf(
+            observableFrames,degradedFrames,pausedFrames,unknownFrames,
+            activeObservableFrames,activeDegradedFrames,activePausedFrames,activeUnknownFrames,
+            interruptionEpisodes,cameraDisturbanceEpisodes,
+        ).forEach{require(it>=0)}
+        activeFrameFillMean?.let{require(it.isFinite()&&it in 0.0..1.0)}
+    }
+}
+data class SetSummary(
+    val setId:String,
+    val endedAtUs:Long,
+    val completedReps:Int,
+    val assistedReps:Int,
+    val uncertainReps:Int,
+    val endedAtEpochMs:Long=0L,
+){
+    init{
+        requireId(setId,"setId")
+        requireTimestamp(endedAtUs,"endedAtUs")
+        requireTimestamp(endedAtEpochMs,"endedAtEpochMs")
+        require(completedReps>=0)
+        require(assistedReps>=0)
+        require(uncertainReps>=0)
+        require(assistedReps+uncertainReps<=completedReps)
+    }
+}
 
 enum class CueDeliveryState { STARTED,COMPLETED,FAILED,CANCELLED }
 data class CueDeliveryRecord(val cueId:String,val state:CueDeliveryState){init{requireId(cueId,"cueId")}}

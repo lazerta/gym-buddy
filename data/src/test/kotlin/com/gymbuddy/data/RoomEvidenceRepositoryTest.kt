@@ -93,6 +93,8 @@ class RoomEvidenceRepositoryTest {
             flowCursor.use { assertTrue(it.moveToFirst()) }
             val calibrationCursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_calibration_profiles'")
             calibrationCursor.use { assertTrue(it.moveToFirst()) }
+            val calibrationHistoryCursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_calibration_profile_history'")
+            calibrationHistoryCursor.use { assertTrue(it.moveToFirst()) }
             val interruptedCursor=migratedDb.openHelper.readableDatabase.query("SELECT name FROM sqlite_master WHERE type='table' AND name='interrupted_sets'")
             interruptedCursor.use { assertTrue(it.moveToFirst()) }
             val flowColumnCursor=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`workout_flow_states`)")
@@ -109,6 +111,32 @@ class RoomEvidenceRepositoryTest {
                 while(it.moveToNext())names+=it.getString(nameIndex)
                 assertTrue("actualLoadValue" in names)
                 assertTrue("actualLoadUnit" in names)
+                assertTrue("startedAtEpochMs" in names)
+            }
+            val sessionColumns=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`workout_sessions`)")
+            sessionColumns.use {
+                val names=mutableSetOf<String>()
+                val nameIndex=it.getColumnIndexOrThrow("name")
+                while(it.moveToNext())names+=it.getString(nameIndex)
+                assertTrue("startedAtEpochMs" in names)
+            }
+            val summaryColumns=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`set_summaries`)")
+            summaryColumns.use {
+                val names=mutableSetOf<String>()
+                val nameIndex=it.getColumnIndexOrThrow("name")
+                while(it.moveToNext())names+=it.getString(nameIndex)
+                assertTrue("endedAtEpochMs" in names)
+            }
+            val trackingColumns=migratedDb.openHelper.readableDatabase.query("PRAGMA table_info(`tracking_quality_summaries`)")
+            trackingColumns.use {
+                val names=mutableSetOf<String>()
+                val nameIndex=it.getColumnIndexOrThrow("name")
+                while(it.moveToNext())names+=it.getString(nameIndex)
+                assertTrue("activeObservableFrames" in names)
+                assertTrue("interruptionEpisodes" in names)
+                assertTrue("cameraDisturbanceEpisodes" in names)
+                assertTrue("observedViewClass" in names)
+                assertTrue("activeFrameFillMean" in names)
             }
         } finally { migratedDb.close() }
         context.deleteDatabase(name)

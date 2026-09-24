@@ -145,6 +145,21 @@ object PersonalCameraPriorCodec {
         )
     }
 
+    fun entryKeys(
+        profile: CameraProfile,
+        equipmentProfileId: String?,
+        viewClass: ViewClass,
+    ): Set<String> {
+        require(viewClass in profile.allowedViewClasses)
+        val prefix = prefix(profile, equipmentProfileId, viewClass)
+        return setOf(
+            "$prefix.$TARGET_FRAME_FILL",
+            "$prefix.$TOLERANCE",
+            "$prefix.$SESSION_COUNT",
+            "$prefix.$CONFIDENCE",
+        )
+    }
+
     fun resolve(
         config: AnalysisConfig,
         policy: PersonalCameraPriorPolicy = PersonalCameraPriorPolicy(),
