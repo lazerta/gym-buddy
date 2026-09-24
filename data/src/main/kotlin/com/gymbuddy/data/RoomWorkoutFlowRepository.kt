@@ -51,12 +51,15 @@ class RoomWorkoutFlowRepository(
         val execution=requireNotNull(dao.execution(set.executionId))
         val session=requireNotNull(dao.session(execution.sessionId))
         return RestCheckpoint(
-            session=WorkoutSessionRecord(session.sessionId,session.startedAtUs),
+            session=WorkoutSessionRecord(
+                session.sessionId,session.startedAtUs,session.startedAtEpochMs
+            ),
             execution=ExerciseExecutionRecord(
                 execution.executionId,
                 execution.sessionId,
                 execution.exerciseId,
                 execution.startedAtUs,
+                execution.startedAtEpochMs,
             ),
             completedSet=set.toRecord(),
             previousReps=summary.completedReps,
@@ -75,12 +78,15 @@ class RoomWorkoutFlowRepository(
         val summary=dao.setSummary(set.setId)
         val committed=summary?.completedReps?:dao.repsForSet(set.setId).size
         return ActiveSetRecovery(
-            session=WorkoutSessionRecord(session.sessionId,session.startedAtUs),
+            session=WorkoutSessionRecord(
+                session.sessionId,session.startedAtUs,session.startedAtEpochMs
+            ),
             execution=ExerciseExecutionRecord(
                 execution.executionId,
                 execution.sessionId,
                 execution.exerciseId,
                 execution.startedAtUs,
+                execution.startedAtEpochMs,
             ),
             set=set.toRecord(),
             committedReps=committed,
@@ -110,6 +116,7 @@ class RoomWorkoutFlowRepository(
         setOrdinal,
         startedAtUs,
         loadSnapshot(actualLoadValue,actualLoadUnit),
+        startedAtEpochMs,
     )
 
     private fun loadSnapshot(value:Double?,unit:String?):LoadSnapshot?{
