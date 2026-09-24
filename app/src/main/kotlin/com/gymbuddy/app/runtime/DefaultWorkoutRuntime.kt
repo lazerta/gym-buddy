@@ -68,7 +68,7 @@ class DefaultWorkoutRuntime(
     private var activeExecution:ExerciseExecutionRecord?=null
     private var activeSet:SetRecord?=null
     private var activeConfig:AnalysisConfig?=null
-    private var activeCheckpointSaved=false
+    private val recoveryCheckpointGate=ActiveSetRecoveryCheckpointGate()
 
     override val analysisExecutor:Executor
         get()=worker
@@ -84,7 +84,7 @@ class DefaultWorkoutRuntime(
         activeExecution=null
         activeSet=null
         activeConfig=null
-        activeCheckpointSaved=false
+        recoveryCheckpointGate.reset()
         latestCueText=null
     }
 
@@ -110,7 +110,7 @@ class DefaultWorkoutRuntime(
         activeExecution=null
         activeSet=null
         activeConfig=null
-        activeCheckpointSaved=false
+        recoveryCheckpointGate.reset()
         latestCueText=null
     }
 
@@ -126,7 +126,7 @@ class DefaultWorkoutRuntime(
         val setId=selectedExecutionId+":set:"+setOrdinal
         val config=configResolver.resolve(selected)
         activeConfig=config
-        activeCheckpointSaved=false
+        recoveryCheckpointGate.reset()
         latestCueText=null
         activeSession=null
         activeExecution=null
@@ -192,18 +192,10 @@ class DefaultWorkoutRuntime(
             val analyzer=currentAnalyzer?:return@FrameConsumer
             try {
                 val result=analyzer.analyze(frame)
-                if(
-                    !activeCheckpointSaved&&
-                    (
-                        result.pipeline.lifecycleState==SetLifecycleState.ACTIVE_SET||
-                        result.pipeline.lifecycleState==SetLifecycleState.POSSIBLE_END||
-                        result.pipeline.lifecycleState==SetLifecycleState.FINALIZING
-                    )
-                ){
+                if(recoveryCheckpointGate.shouldPersist(result.pipeline.lifecycleState)){
                     val set=activeSet
                     if(set!=null){
                         flowRepository.saveActiveSetCheckpoint(set.setId)
-                        activeCheckpointSaved=true
                     }
                 }
                 listener(
@@ -250,7 +242,7 @@ class DefaultWorkoutRuntime(
                     activeExecution=null
                     activeSet=null
                     activeConfig=null
-                    activeCheckpointSaved=false
+                    recoveryCheckpointGate.reset()
                     latestCueText=null
                 }
             }
