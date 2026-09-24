@@ -98,11 +98,36 @@ object GymBuddyMigrations {
         }
     }
 
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `personal_calibration_profile_history` (
+                    `calibrationProfileId` TEXT NOT NULL,
+                    `profileVersion` INTEGER NOT NULL,
+                    `semanticHash` TEXT NOT NULL,
+                    `payload` TEXT NOT NULL,
+                    PRIMARY KEY(`calibrationProfileId`, `profileVersion`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                INSERT OR IGNORE INTO `personal_calibration_profile_history`
+                    (`calibrationProfileId`, `profileVersion`, `semanticHash`, `payload`)
+                SELECT `calibrationProfileId`, `profileVersion`, `semanticHash`, `payload`
+                FROM `personal_calibration_profiles`
+                """.trimIndent()
+            )
+        }
+    }
+
     val ALL = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
         MIGRATION_3_4,
         MIGRATION_4_5,
         MIGRATION_5_6,
+        MIGRATION_6_7,
     )
 }
