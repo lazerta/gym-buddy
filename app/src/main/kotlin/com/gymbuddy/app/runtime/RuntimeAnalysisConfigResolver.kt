@@ -16,11 +16,27 @@ internal class RuntimeAnalysisConfigResolver(
         val calibration=runCatching{loadCalibration()}
             .onFailure(onCalibrationRejected)
             .getOrNull()
-        return AnalysisConfigResolver.resolve(
+
+        if(calibration==null){
+            return generic(bundle)
+        }
+
+        return runCatching{
+            AnalysisConfigResolver.resolve(
+                bundle.definition,
+                bundle.profile,
+                bundle.equipment,
+                calibration,
+            )
+        }.onFailure(onCalibrationRejected)
+            .getOrElse{generic(bundle)}
+    }
+
+    private fun generic(bundle:ExerciseBundle):AnalysisConfig =
+        AnalysisConfigResolver.resolve(
             bundle.definition,
             bundle.profile,
             bundle.equipment,
-            calibration,
+            null,
         )
-    }
 }
