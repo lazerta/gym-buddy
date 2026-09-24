@@ -49,10 +49,10 @@ import androidx.room.*
         WHERE e.exerciseId=:exerciseId
           AND s.setId!=:currentSetId
           AND (
-              ss.endedAtEpochMs<:beforeEndedAtEpochMs OR
-              (ss.endedAtEpochMs=:beforeEndedAtEpochMs AND s.setId<:currentSetId)
+              (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)<:beforeEndedAtEpochMs OR
+              ((CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)=:beforeEndedAtEpochMs AND s.setId<:currentSetId)
           )
-        ORDER BY ss.endedAtEpochMs DESC, s.setId DESC
+        ORDER BY (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END) DESC, s.setId DESC
         LIMIT :limit
     """)
     abstract fun recentComparableSetIds(
@@ -71,11 +71,11 @@ import androidx.room.*
         WHERE e.exerciseId=:exerciseId
           AND ws.sessionId!=:currentSessionId
           AND (
-              ws.startedAtEpochMs<:beforeSessionStartedAtEpochMs OR
-              (ws.startedAtEpochMs=:beforeSessionStartedAtEpochMs AND ws.sessionId<:currentSessionId)
+              (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)<:beforeSessionStartedAtEpochMs OR
+              ((CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)=:beforeSessionStartedAtEpochMs AND ws.sessionId<:currentSessionId)
           )
         GROUP BY ws.sessionId
-        ORDER BY ws.startedAtEpochMs DESC, ws.sessionId DESC
+        ORDER BY (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END) DESC, ws.sessionId DESC
         LIMIT :limit
     """)
     abstract fun recentComparableSessionIds(
@@ -92,7 +92,7 @@ import androidx.room.*
         JOIN set_summaries ss ON ss.setId=s.setId
         WHERE e.sessionId=:sessionId
           AND e.exerciseId=:exerciseId
-        ORDER BY ss.endedAtEpochMs, s.setOrdinal, s.setId
+        ORDER BY (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END), s.setOrdinal, s.setId
     """)
     abstract fun completedSetIdsForSessionExercise(
         sessionId:String,
