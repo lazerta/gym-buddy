@@ -42,8 +42,25 @@ data class RestCheckpoint(
     }
 }
 
+data class ActiveSetRecovery(
+    val session:WorkoutSessionRecord,
+    val execution:ExerciseExecutionRecord,
+    val set:SetRecord,
+    val committedReps:Int,
+    val finalized:Boolean,
+){
+    init{
+        require(execution.sessionId==session.sessionId)
+        require(set.executionId==execution.executionId)
+        require(committedReps>=0)
+    }
+}
+
 interface WorkoutFlowRepository {
+    fun saveActiveSetCheckpoint(setId:String)
     fun saveRestCheckpoint(checkpoint:RestCheckpointDraft)
     fun loadRestCheckpoint():RestCheckpoint?
+    fun loadActiveSetRecovery():ActiveSetRecovery?
+    fun markInterruptedSet(setId:String,recoveredAtEpochMs:Long,committedReps:Int)
     fun clearRestCheckpoint()
 }
