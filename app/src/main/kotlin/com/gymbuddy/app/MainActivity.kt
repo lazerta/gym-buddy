@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gymbuddy.app.controller.WorkoutController
 import com.gymbuddy.app.controller.WorkoutDay
+import com.gymbuddy.app.runtime.CameraMotionSignalStore
 import com.gymbuddy.app.runtime.DefaultWorkoutRuntime
 import com.gymbuddy.app.ui.GymBuddyApp
 
@@ -36,8 +37,9 @@ class MainActivity:ComponentActivity(){
         val initialDay=runCatching{
             WorkoutDay.valueOf(savedInstanceState?.getString(STATE_SELECTED_DAY)?:WorkoutDay.PUSH.name)
         }.getOrDefault(WorkoutDay.PUSH)
+        val cameraMotionSignals=CameraMotionSignalStore()
         controller=WorkoutController(
-            runtime=DefaultWorkoutRuntime(applicationContext),
+            runtime=DefaultWorkoutRuntime(applicationContext,cameraMotionSignals),
             initialDay=initialDay,
         )
         cameraBridge=CameraSessionBridge(
@@ -45,6 +47,7 @@ class MainActivity:ComponentActivity(){
             lifecycleOwner=this,
             analysisExecutor=controller.analysisExecutor,
             frameConsumer=controller.frameConsumer(),
+            cameraMotionSignals=cameraMotionSignals,
         )
 
         setContent{

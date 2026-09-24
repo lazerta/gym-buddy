@@ -19,6 +19,7 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertTrackingSummary(e:TrackingQualitySummaryEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertSetSummary(e:SetSummaryEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutFlowState(e:WorkoutFlowStateEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertInterruptedSet(e:InterruptedSetEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertPersonalCalibration(e:PersonalCalibrationProfileEntity)
 
     @Query("SELECT * FROM workout_sessions WHERE sessionId=:id") abstract fun session(id:String):WorkoutSessionEntity?
@@ -61,6 +62,8 @@ import androidx.room.*
     ):List<String>
     @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)
+    @Query("DELETE FROM workout_flow_states WHERE checkpointId=:checkpointId AND completedSetId=:setId") abstract fun deleteWorkoutFlowStateForSet(checkpointId:String,setId:String)
+    @Query("SELECT * FROM interrupted_sets WHERE setId=:setId") abstract fun interruptedSet(setId:String):InterruptedSetEntity?
     @Query("SELECT * FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun personalCalibration(slotId:String):PersonalCalibrationProfileEntity?
     @Query("DELETE FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun deletePersonalCalibration(slotId:String)
 
@@ -71,5 +74,9 @@ import androidx.room.*
         if(o.isNotEmpty())insertObservations(o)
         if(c.isNotEmpty())insertCues(c)
         if(responses.isNotEmpty())insertCueResponses(responses)
+    }
+    @Transaction open fun markInterruptedAndClearFlow(e:InterruptedSetEntity,checkpointId:String){
+        upsertInterruptedSet(e)
+        deleteWorkoutFlowStateForSet(checkpointId,e.setId)
     }
 }
