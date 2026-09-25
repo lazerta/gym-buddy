@@ -1,0 +1,53 @@
+name: local-acceptance-deps-split
+on:
+  push:
+    branches: [infra/local-acceptance-kit-2026-09-25]
+    paths: [.github/workflows/local-acceptance-deps-split.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-acceptance-dependencies
+          run-id: 36154137505
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: deps
+      - name: Split and checksum public dependency archives
+        run: |
+          set -euo pipefail
+          mkdir -p parts
+          sha256sum deps/*.tar.gz > parts/SHA256SUMS
+          split -b 300M -d deps/gradle-modules.tar.gz parts/gradle-modules.part-
+          mv deps/maven-repository.tar.gz parts/
+          du -h parts/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-modules-00
+          path: parts/gradle-modules.part-00
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-modules-01
+          path: parts/gradle-modules.part-01
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-modules-02
+          path: parts/gradle-modules.part-02
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-maven
+          path: |
+            parts/maven-repository.tar.gz
+            parts/SHA256SUMS
+          compression-level: 0
+          retention-days: 1
