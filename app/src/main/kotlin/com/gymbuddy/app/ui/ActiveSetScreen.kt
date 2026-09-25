@@ -1,11 +1,6 @@
 package com.gymbuddy.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -32,6 +27,10 @@ fun ActiveSetScreen(
                 style=MaterialTheme.typography.subtitle1,
             )
             Text(state.trackingText,style=MaterialTheme.typography.body2)
+            state.cameraInstruction?.let{
+                Spacer(Modifier.height(8.dp))
+                Text(it,fontSize=24.sp)
+            }
         }
         Column(horizontalAlignment=Alignment.CenterHorizontally){
             Text(state.repCount.toString(),fontSize=112.sp)
@@ -40,9 +39,6 @@ fun ActiveSetScreen(
                 Text(it,fontSize=28.sp)
             }
         }
-        Button(
-            modifier=Modifier.fillMaxWidth(),
-            onClick=onEndSet,
-        ){Text("End Set")}
+        Button(modifier=Modifier.fillMaxWidth(),onClick=onEndSet){Text("End Set")}
     }
 }

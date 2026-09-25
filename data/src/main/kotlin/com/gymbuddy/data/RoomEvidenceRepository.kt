@@ -2,7 +2,7 @@ package com.gymbuddy.data
 
 import com.gymbuddy.domain.coaching.*
 import com.gymbuddy.domain.evidence.*
-import com.gymbuddy.domain.movement.RepClassification
+import com.gymbuddy.domain.movement.*
 import com.gymbuddy.domain.persistence.*
 import com.gymbuddy.domain.profile.*
 
@@ -21,7 +21,8 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
         if(e==null){
             dao.insertExecution(
                 ExerciseExecutionEntity(
-                    r.executionId,r.sessionId,r.exerciseId,r.startedAtUs,r.startedAtEpochMs
+                    r.executionId,r.sessionId,r.exerciseId,r.startedAtUs,r.startedAtEpochMs,
+                    r.plannedExerciseId,r.equipmentContextId
                 )
             )
         }else{
@@ -29,7 +30,9 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
                 e.sessionId==r.sessionId&&
                     e.exerciseId==r.exerciseId&&
                     e.startedAtUs==r.startedAtUs&&
-                    e.startedAtEpochMs==r.startedAtEpochMs
+                    e.startedAtEpochMs==r.startedAtEpochMs&&
+                    e.plannedExerciseId==r.plannedExerciseId&&
+                    e.equipmentContextId==r.equipmentContextId
             )
         }
     }
@@ -41,7 +44,12 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
             dao.insertSetWithContext(
                 SetEntity(
                     r.setId,r.executionId,r.setOrdinal,r.startedAtUs,
-                    r.actualLoad?.value,r.actualLoad?.unit,r.startedAtEpochMs
+                    r.actualLoad?.value,r.actualLoad?.unit,r.startedAtEpochMs,
+                    r.actualLoad?.basis?.name?:LoadBasis.UNKNOWN.name,
+                    r.actualLoad?.source?.name?:LoadSource.UNKNOWN.name,
+                    r.plannedLoad?.value,r.plannedLoad?.unit,
+                    r.plannedLoad?.basis?.name?:LoadBasis.UNKNOWN.name,
+                    r.plannedLoad?.source?.name?:LoadSource.UNKNOWN.name,
                 ),
                 x,
             )
@@ -51,13 +59,14 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
                     e.setOrdinal==r.setOrdinal&&
                     e.startedAtUs==r.startedAtUs&&
                     e.startedAtEpochMs==r.startedAtEpochMs&&
-                    loadSnapshot(e.actualLoadValue,e.actualLoadUnit)==r.actualLoad
+                    loadSnapshot(e.actualLoadValue,e.actualLoadUnit,e.actualLoadBasis,e.actualLoadSource)==r.actualLoad&&
+                    loadSnapshot(e.plannedLoadValue,e.plannedLoadUnit,e.plannedLoadBasis,e.plannedLoadSource)==r.plannedLoad
             )
             require(dao.analysisContext(r.setId)==x)
         }
     }
 
-    override fun persistRep(setId:String,e:RepEvidence){val bundle=repEntities(setId,e);dao.insertRepBundle(bundle.rep,bundle.signals,bundle.metrics)}
+    override fun persistRep(setId:String,e:RepEvidence){val bundle=repEntities(setId,e);dao.insertRepBundle(bundle.rep,bundle.signals,bundle.metrics,bundle.phases)}
     override fun persistFormObservation(setId:String,o:FormObservation){require(dao.rep(o.repId)?.setId==setId);dao.insertObservation(observationEntity(setId,o))}
     override fun persistCueEvent(setId:String,c:CueEvent,observationId:String?){validateCue(setId,c,observationId,emptyList());dao.insertCue(cueEntity(setId,c,observationId))}
     override fun persistCueResponse(setId:String,r:CueResponse){dao.insertCueResponse(responseEntity(setId,r,emptyList(),null,null))}
@@ -71,13 +80,32 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
         dao.upsertCueDelivery(CueDeliveryEntity(record.cueId,record.state.name))
     }
 
+    override fun persistInvalidAttempt(setId:String,attempt:InvalidAttemptEvidence){
+        requireNotNull(dao.set(setId))
+        val inserted=dao.insertInvalidAttempt(
+            InvalidAttemptEvidenceEntity(
+                attempt.attemptId,setId,attempt.stepId,attempt.primitive.name,
+                attempt.startedAtUs,attempt.endedAtUs,attempt.reason.name,attempt.minConfidence,
+            )
+        )
+        if(inserted==-1L){
+            val existing=dao.invalidAttemptsForSet(setId).singleOrNull{it.attemptId==attempt.attemptId}
+            require(existing!=null&&existing.reason==attempt.reason.name&&existing.startedAtUs==attempt.startedAtUs&&existing.endedAtUs==attempt.endedAtUs){
+                "persisted invalid attempt is immutable"
+            }
+        }
+    }
+
     override fun persistCompletedRepBundle(setId:String,evidence:RepEvidence,observations:List<FormObservation>,cues:List<CueEvidenceLink>,responses:List<CueResponse>){
         val bundle=repEntities(setId,evidence)
         require(observations.all{it.repId==evidence.repId})
         val observationEntities=observations.map{observationEntity(setId,it)}
         val cueEntities=cues.map{link->validateCue(setId,link.cue,link.observationId,observations);cueEntity(setId,link.cue,link.observationId)}
         val responseEntities=responses.map{responseEntity(setId,it,cues.map{link->link.cue},evidence.repId,evidence.completedAtUs)}
-        dao.insertCompletedRepBundle(bundle.rep,bundle.signals,bundle.metrics,observationEntities,cueEntities,responseEntities)
+        dao.insertCompletedRepBundle(
+            bundle.rep,bundle.signals,bundle.metrics,bundle.phases,
+            observationEntities,cueEntities,responseEntities,
+        )
     }
 
     override fun upsertTrackingSummary(s:TrackingQualitySummary){
@@ -132,10 +160,18 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
                     else EvidenceValue.Unknown(requireNotNull(m.unknownReason)),
                 )
             }
+            val phases=dao.phasesForRep(r.repId).map{phase->
+                RepPhaseInterval(
+                    PrimitivePhase.valueOf(phase.phase),phase.startedAtUs,phase.endedAtUs,phase.confidence
+                )
+            }
             RepEvidence(
                 r.repId,r.repOrdinal,r.stepId,MovementPrimitive.valueOf(r.primitive),
                 r.startedAtUs,r.completedAtUs,RepClassification.valueOf(r.classification),
-                sig,met,ctx.toAnalysisProvenance()
+                sig,met,ctx.toAnalysisProvenance(),
+                phaseIntervals=phases,
+                assistanceAssessment=AssistanceAssessmentState.valueOf(r.assistanceAssessment),
+                assistanceScore=r.assistanceScore,
             )
         }
         val obs=dao.observationsForSet(setId).map{
@@ -183,21 +219,31 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
         return PersistedSetEvidence(
             SetRecord(
                 s.setId,s.executionId,s.setOrdinal,s.startedAtUs,
-                loadSnapshot(s.actualLoadValue,s.actualLoadUnit),s.startedAtEpochMs,
+                loadSnapshot(s.actualLoadValue,s.actualLoadUnit,s.actualLoadBasis,s.actualLoadSource),s.startedAtEpochMs,
+                loadSnapshot(s.plannedLoadValue,s.plannedLoadUnit,s.plannedLoadBasis,s.plannedLoadSource),
             ),
             ctx.toAnalysisProvenance(),reps,obs,cues,responses,tr,sum,deliveries,cueObservationIds,
+            dao.invalidAttemptsForSet(setId).map{row->
+                InvalidAttemptEvidence(
+                    row.attemptId,row.stepId,MovementPrimitive.valueOf(row.primitive),
+                    row.startedAtUs,row.endedAtUs,RepInvalidReason.valueOf(row.reason),row.minConfidence,
+                )
+            },
         )
     }
 
-    private fun loadSnapshot(value:Double?,unit:String?):LoadSnapshot?{
+    private fun loadSnapshot(
+        value:Double?,unit:String?,basis:String=LoadBasis.UNKNOWN.name,source:String=LoadSource.UNKNOWN.name,
+    ):LoadSnapshot?{
         require(value!=null||unit==null)
-        return value?.let{LoadSnapshot(it,unit)}
+        return value?.let{LoadSnapshot(it,unit,LoadBasis.valueOf(basis),LoadSource.valueOf(source))}
     }
 
     private data class RepEntities(
         val rep:RepEvidenceEntity,
         val signals:List<RepSignalEvidenceEntity>,
         val metrics:List<RepMetricEvidenceEntity>,
+        val phases:List<RepPhaseEvidenceEntity>,
     )
     private fun repEntities(setId:String,e:RepEvidence):RepEntities{
         val s=requireNotNull(dao.set(setId))
@@ -207,7 +253,8 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
         require(dao.repByOrdinal(setId,e.ordinal)==null)
         val re=RepEvidenceEntity(
             e.repId,setId,e.ordinal,e.stepId,e.primitive.name,
-            e.startedAtUs,e.completedAtUs,e.classification.name
+            e.startedAtUs,e.completedAtUs,e.classification.name,
+            e.assistanceAssessment.name,e.assistanceScore,
         )
         val sig=e.signals.values.map{
             RepSignalEvidenceEntity(
@@ -224,7 +271,12 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
                 )
             }
         }
-        return RepEntities(re,sig,met)
+        val phases=e.phaseIntervals.mapIndexed{index,phase->
+            RepPhaseEvidenceEntity(
+                e.repId,index,phase.phase.name,phase.startedAtUs,phase.endedAtUs,phase.confidence
+            )
+        }
+        return RepEntities(re,sig,met,phases)
     }
     private fun observationEntity(setId:String,o:FormObservation)=FormObservationEntity(
         o.observationId,setId,o.repId,o.ruleId,o.ruleVersion,o.state.name,

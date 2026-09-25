@@ -122,6 +122,123 @@ object GymBuddyMigrations {
         }
     }
 
+
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `exercise_executions` ADD COLUMN `plannedExerciseId` TEXT")
+            db.execSQL("ALTER TABLE `exercise_executions` ADD COLUMN `equipmentContextId` TEXT")
+
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `actualLoadBasis` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `actualLoadSource` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `plannedLoadValue` REAL")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `plannedLoadUnit` TEXT")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `plannedLoadBasis` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            db.execSQL("ALTER TABLE `sets` ADD COLUMN `plannedLoadSource` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+
+            db.execSQL("ALTER TABLE `rep_evidence` ADD COLUMN `assistanceAssessment` TEXT NOT NULL DEFAULT 'NOT_ASSESSED'")
+            db.execSQL("ALTER TABLE `rep_evidence` ADD COLUMN `assistanceScore` REAL")
+
+            db.execSQL("ALTER TABLE `workout_flow_states` ADD COLUMN `plannedNextLoadBasis` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            db.execSQL("ALTER TABLE `workout_flow_states` ADD COLUMN `plannedNextLoadSource` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `rep_phase_evidence` (
+                    `repId` TEXT NOT NULL,
+                    `phaseOrdinal` INTEGER NOT NULL,
+                    `phase` TEXT NOT NULL,
+                    `startedAtUs` INTEGER NOT NULL,
+                    `endedAtUs` INTEGER NOT NULL,
+                    `confidence` REAL,
+                    PRIMARY KEY(`repId`, `phaseOrdinal`),
+                    FOREIGN KEY(`repId`) REFERENCES `rep_evidence`(`repId`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_rep_phase_evidence_repId` ON `rep_phase_evidence` (`repId`)")
+
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `invalid_attempt_evidence` (
+                    `attemptId` TEXT NOT NULL,
+                    `setId` TEXT NOT NULL,
+                    `stepId` TEXT NOT NULL,
+                    `primitive` TEXT NOT NULL,
+                    `startedAtUs` INTEGER NOT NULL,
+                    `endedAtUs` INTEGER NOT NULL,
+                    `reason` TEXT NOT NULL,
+                    `minConfidence` REAL,
+                    PRIMARY KEY(`attemptId`),
+                    FOREIGN KEY(`setId`) REFERENCES `sets`(`setId`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_invalid_attempt_evidence_setId` ON `invalid_attempt_evidence` (`setId`)")
+
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `exercise_preferences` (
+                    `exerciseId` TEXT NOT NULL,
+                    `favorite` INTEGER NOT NULL,
+                    `lastSelectedAtEpochMs` INTEGER NOT NULL,
+                    `equipmentContextId` TEXT,
+                    PRIMARY KEY(`exerciseId`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `equipment_contexts` (
+                    `contextId` TEXT NOT NULL,
+                    `baseEquipmentProfileId` TEXT NOT NULL,
+                    `label` TEXT NOT NULL,
+                    `updatedAtEpochMs` INTEGER NOT NULL,
+                    PRIMARY KEY(`contextId`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `workout_exercise_completions` (
+                    `sessionId` TEXT NOT NULL,
+                    `exerciseId` TEXT NOT NULL,
+                    `completedSets` INTEGER NOT NULL,
+                    `completedAtEpochMs` INTEGER NOT NULL,
+                    PRIMARY KEY(`sessionId`, `exerciseId`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_workout_exercise_completions_sessionId` ON `workout_exercise_completions` (`sessionId`)")
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `workout_product_state` (
+                    `slotId` TEXT NOT NULL,
+                    `activeSessionId` TEXT,
+                    PRIMARY KEY(`slotId`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `gpt_analyses` (
+                    `analysisId` TEXT NOT NULL,
+                    `setId` TEXT NOT NULL,
+                    `schemaVersion` INTEGER NOT NULL,
+                    `modelLabel` TEXT NOT NULL,
+                    `createdAtEpochMs` INTEGER NOT NULL,
+                    `sourceSetIdsPayload` TEXT NOT NULL,
+                    `summary` TEXT NOT NULL,
+                    `recommendationsPayload` TEXT NOT NULL,
+                    PRIMARY KEY(`analysisId`),
+                    FOREIGN KEY(`setId`) REFERENCES `sets`(`setId`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_gpt_analyses_setId` ON `gpt_analyses` (`setId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_gpt_analyses_setId_createdAtEpochMs` ON `gpt_analyses` (`setId`, `createdAtEpochMs`)")
+        }
+    }
+
     val ALL = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -129,5 +246,6 @@ object GymBuddyMigrations {
         MIGRATION_4_5,
         MIGRATION_5_6,
         MIGRATION_6_7,
+        MIGRATION_7_8,
     )
 }

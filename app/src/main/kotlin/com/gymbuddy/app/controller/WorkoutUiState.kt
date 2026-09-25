@@ -1,10 +1,24 @@
 package com.gymbuddy.app.controller
 
+import com.gymbuddy.domain.persistence.LoadBasis
+import com.gymbuddy.domain.persistence.LoadSource
+
 enum class WorkoutDay(val label:String){PUSH("Push"),PULL("Pull"),LEGS("Legs")}
 
 data class ExerciseRowUiState(
     val exerciseId:String,
     val displayName:String,
+    val completedSets:Int=0,
+    val favorite:Boolean=false,
+    val recent:Boolean=false,
+    val equipmentLabel:String?=null,
+)
+
+data class GptAnalysisUiState(
+    val analysisId:String,
+    val modelLabel:String,
+    val summary:String,
+    val createdAtEpochMs:Long,
 )
 
 enum class CameraReadinessUi { SETTING_UP, READY }
@@ -20,6 +34,14 @@ sealed interface WorkoutUiState {
     data class ExerciseSelection(
         val selectedDay:WorkoutDay,
         val exercises:List<ExerciseRowUiState>,
+        val otherExerciseOpen:Boolean=false,
+        val searchQuery:String="",
+        val searchResults:List<ExerciseRowUiState> = emptyList(),
+        val recentExercises:List<ExerciseRowUiState> = emptyList(),
+        val favoriteExercises:List<ExerciseRowUiState> = emptyList(),
+        val substitutionForExerciseId:String?=null,
+        val equipmentEditorExerciseId:String?=null,
+        val equipmentLabelInput:String="",
     ):WorkoutUiState
 
     data class CameraSetup(
@@ -38,6 +60,7 @@ sealed interface WorkoutUiState {
         val repCount:Int,
         val trackingText:String,
         val cue:String?,
+        val cameraInstruction:String?=null,
     ):WorkoutUiState
 
     data class Rest(
@@ -49,6 +72,9 @@ sealed interface WorkoutUiState {
         val focus:String,
         val plannedNextLoadText:String,
         val restStartedAtEpochMs:Long,
+        val plannedNextLoadUnit:String?=null,
+        val plannedNextLoadBasis:LoadBasis=LoadBasis.UNKNOWN,
+        val plannedNextLoadSource:LoadSource=LoadSource.PLANNED,
     ):WorkoutUiState
 
     data class Summary(
@@ -56,6 +82,8 @@ sealed interface WorkoutUiState {
         val exerciseName:String,
         val completedSets:List<CompletedSetUiState>,
         val evidenceSummary:String,
+        val recurringEvidence:List<String> = emptyList(),
+        val savedAnalyses:List<GptAnalysisUiState> = emptyList(),
     ):WorkoutUiState
 }
 

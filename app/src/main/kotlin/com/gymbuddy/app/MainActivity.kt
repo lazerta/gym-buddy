@@ -70,6 +70,18 @@ class MainActivity:ComponentActivity(){
                 },
                 onResetCalibration=::handleCalibrationReset,
                 onReturnToExercises=controller::returnToSelection,
+                onOpenOtherExercise=controller::openOtherExercise,
+                onCloseOtherExercise=controller::closeOtherExercise,
+                onSearchChange=controller::updateExerciseSearch,
+                onSelectOtherExercise=controller::selectOtherExercise,
+                onBeginSubstitution=controller::beginSubstitution,
+                onToggleFavorite=controller::toggleFavorite,
+                onEditEquipment=controller::editEquipment,
+                onEquipmentLabelChange=controller::updateEquipmentLabel,
+                onSaveEquipmentContext=controller::saveEquipmentContext,
+                onStartNewWorkout=controller::startNewWorkout,
+                onNextLoadUnitChange=controller::updateNextLoadUnit,
+                onNextLoadBasisChange=controller::updateNextLoadBasis,
             )
         }
     }

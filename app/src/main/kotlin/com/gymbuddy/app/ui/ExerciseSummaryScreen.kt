@@ -1,15 +1,7 @@
 package com.gymbuddy.app.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.Button
-import androidx.compose.material.Card
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.OutlinedButton
-import androidx.compose.material.Text
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -36,17 +28,23 @@ fun ExerciseSummaryScreen(
             }
         }
         Text(state.evidenceSummary,style=MaterialTheme.typography.h6)
-        OutlinedButton(
-            modifier=Modifier.fillMaxWidth(),
-            onClick=onAskChatGpt,
-        ){Text("Ask ChatGPT")}
-        OutlinedButton(
-            modifier=Modifier.fillMaxWidth(),
-            onClick=onResetCalibration,
-        ){Text("Reset calibration")}
-        Button(
-            modifier=Modifier.fillMaxWidth(),
-            onClick=onReturnToExercises,
-        ){Text("Back to Exercises")}
+        if(state.recurringEvidence.isNotEmpty()){
+            Text("Recurring evidence",style=MaterialTheme.typography.subtitle1)
+            state.recurringEvidence.forEach{Text("• $it")}
+        }
+        if(state.savedAnalyses.isNotEmpty()){
+            Text("Saved analyses",style=MaterialTheme.typography.subtitle1)
+            state.savedAnalyses.forEach{analysis->
+                Card(Modifier.fillMaxWidth()){
+                    Column(Modifier.padding(12.dp)){
+                        Text(analysis.modelLabel,style=MaterialTheme.typography.caption)
+                        Text(analysis.summary)
+                    }
+                }
+            }
+        }
+        OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick=onAskChatGpt){Text("Ask ChatGPT")}
+        OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick=onResetCalibration){Text("Reset calibration")}
+        Button(modifier=Modifier.fillMaxWidth(),onClick=onReturnToExercises){Text("Back to Exercises")}
     }
 }

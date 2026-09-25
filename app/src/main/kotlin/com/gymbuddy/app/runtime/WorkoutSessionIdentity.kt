@@ -62,6 +62,31 @@ internal class WorkoutSessionIdentity(
         this.executionStartedAtEpochMs=executionStartedAtEpochMs
     }
 
+    fun resumeSession(
+        sessionId:String,
+        sessionStartedAtUs:Long,
+        sessionStartedAtEpochMs:Long=0L,
+    ){
+        require(sessionId.isNotBlank())
+        require(sessionStartedAtUs>=0L)
+        require(sessionStartedAtEpochMs>=0L)
+        this.sessionId=sessionId
+        this.sessionStartedAtUs=sessionStartedAtUs
+        this.sessionStartedAtEpochMs=sessionStartedAtEpochMs
+        this.executionId=null
+        this.executionStartedAtUs=null
+        this.executionStartedAtEpochMs=null
+    }
+
+    fun reset(){
+        sessionId=null
+        executionId=null
+        sessionStartedAtUs=null
+        executionStartedAtUs=null
+        sessionStartedAtEpochMs=null
+        executionStartedAtEpochMs=null
+    }
+
     fun ensureStarted(
         firstFrameTimestampUs:Long,
         wallClockEpochMs:Long=0L,
