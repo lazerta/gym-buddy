@@ -39,28 +39,7 @@ class RoomPersonalCalibrationRepository(
             "personal calibration semantic hash mismatch"
         }
         val payload=PersonalCalibrationProfileBinaryCodec.encode(profile)
-        val existing=dao.personalCalibrationHistory(
-            profile.calibrationProfileId,
-            profile.profileVersion,
-        )
-        if(existing==null){
-            dao.insertPersonalCalibrationHistory(
-                PersonalCalibrationProfileHistoryEntity(
-                    calibrationProfileId=profile.calibrationProfileId,
-                    profileVersion=profile.profileVersion,
-                    semanticHash=profile.semanticHash,
-                    payload=payload,
-                )
-            )
-        }else{
-            require(existing.semanticHash==profile.semanticHash){
-                "published calibration version is immutable"
-            }
-            require(existing.payload==payload){
-                "published calibration payload is immutable"
-            }
-        }
-        dao.upsertPersonalCalibration(
+        dao.publishPersonalCalibration(
             PersonalCalibrationProfileEntity(
                 slotId=ACTIVE_SLOT,
                 calibrationProfileId=profile.calibrationProfileId,

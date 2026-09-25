@@ -48,6 +48,14 @@ class ProductionRuntimeBoundaryRegressionTest {
         }
     }
 
+    @Test fun manualEndWorksWhileAnActiveAttemptIsReacquiringTheCamera() {
+        val replay=replay()
+        replay.cycle()
+        replay.step(motion=.9)
+        assertEquals(com.gymbuddy.domain.lifecycle.SetLifecycleState.FINALIZING,replay.pipeline.manualEnd())
+        assertEquals(com.gymbuddy.domain.lifecycle.SetLifecycleState.ENDED,replay.pipeline.finalized())
+    }
+
     @Test fun committedRepOrdinalSurvivesFailedCameraReacquisition() {
         val replay = replay()
         replay.cycle()

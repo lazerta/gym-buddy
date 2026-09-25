@@ -79,9 +79,9 @@ class RoomPersonalCalibrationLifecycleTest {
             )
             assertEquals(
                 setOf(
-                    "movement-session:session-1",
-                    "movement-session:session-2",
-                    "movement-session:session-3",
+                    RoomPersonalCalibrationLifecycle.movementReference("session-1",baseline.key),
+                    RoomPersonalCalibrationLifecycle.movementReference("session-2",baseline.key),
+                    RoomPersonalCalibrationLifecycle.movementReference("session-3",baseline.key),
                 ),
                 active.evidenceReferences.filter{
                     it.startsWith("movement-session:")
@@ -176,9 +176,9 @@ class RoomPersonalCalibrationLifecycleTest {
                 .toSet()
             assertEquals(
                 setOf(
-                    "movement-session:clean-1",
-                    "movement-session:clean-2",
-                    "movement-session:clean-3",
+                    RoomPersonalCalibrationLifecycle.movementReference("clean-1",baseline.key),
+                    RoomPersonalCalibrationLifecycle.movementReference("clean-2",baseline.key),
+                    RoomPersonalCalibrationLifecycle.movementReference("clean-3",baseline.key),
                 ),
                 movementRefs,
             )

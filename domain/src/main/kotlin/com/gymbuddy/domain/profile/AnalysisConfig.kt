@@ -9,6 +9,18 @@ data class AnalysisProvenance(
 data class AnalysisConfig(val exerciseDefinition:ExerciseDefinition,val exerciseProfile:ExerciseProfile,val equipmentProfile:EquipmentProfile?,val personalCalibrationProfile:PersonalCalibrationProfile?,val preferredViewClass:ViewClass,val resolvedSignalParameters:Map<String,Map<String,Double>>,val activeExerciseBaseline:ExerciseBaseline?,val provenance:AnalysisProvenance)
 
 object AnalysisConfigResolver {
+    /** Resolve only view-scoped personalization from the immutable set snapshot.
+     * An unknown, unsupported or ambiguous personal context falls back to generic rules.
+     * This never changes generic observability requirements or historical provenance.
+     */
+    fun forObservedView(config: AnalysisConfig, viewClass: ViewClass?): AnalysisConfig {
+        val baseline = if (viewClass == null || viewClass !in config.exerciseProfile.cameraProfile.allowedViewClasses) null
+        else runCatching {
+            resolveCalibrationBaseline(config.exerciseProfile, config.equipmentProfile, viewClass, config.personalCalibrationProfile)
+        }.getOrNull()
+        return config.copy(activeExerciseBaseline = baseline)
+    }
+
     fun resolve(exerciseDefinition:ExerciseDefinition,exerciseProfile:ExerciseProfile,equipmentProfile:EquipmentProfile?=null,personalCalibrationProfile:PersonalCalibrationProfile?=null):AnalysisConfig{
         require(exerciseDefinition.exerciseId==exerciseProfile.exerciseId){"ExerciseDefinition and ExerciseProfile exerciseId must match"}
         val preferredView=resolveEquipmentView(exerciseProfile,equipmentProfile)
