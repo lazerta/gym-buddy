@@ -1,0 +1,56 @@
+name: local-completion-cache-parts
+on:
+  push:
+    branches: [review/local-completion-bootstrap-2026-09-25]
+    paths: [.github/workflows/local-completion-cache-parts.yml]
+permissions:
+  contents: read
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 466937a6f9ff44114164a31f24bf2a98ece186f2
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+      - run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --continue --stacktrace
+      - name: Package only public dependency artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p deps
+          tar --exclude='*.lock' --exclude='gc.properties' -czf deps/modules.tar.gz -C "$HOME/.gradle/caches" modules-2
+          if [ -d "$HOME/.m2/repository/org/robolectric" ]; then
+            tar -czf deps/robolectric.tar.gz -C "$HOME/.m2/repository" org/robolectric
+          fi
+          cp app/src/main/assets/pose_landmarker_lite.task deps/
+          tar -cf public-dependencies.tar deps
+          split -b 350M -d public-dependencies.tar dependency-part-
+          sha256sum dependency-part-* > dependency-checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completion-cache-part-00
+          path: dependency-part-00
+          compression-level: 0
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completion-cache-part-01
+          path: dependency-part-01
+          compression-level: 0
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completion-cache-part-02
+          path: |
+            dependency-part-02
+            dependency-checksums.txt
+          compression-level: 0
+          retention-days: 2
