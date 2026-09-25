@@ -32,7 +32,7 @@ data class ProductionFrameResult(
 )
 
 class ProductionPoseFrameProcessor(
-    config:AnalysisConfig,
+    private val config:AnalysisConfig,
     private val repository:EvidenceRepository?=null,
     private val session:WorkoutSessionRecord?=null,
     private val execution:ExerciseExecutionRecord?=null,
@@ -43,6 +43,7 @@ class ProductionPoseFrameProcessor(
         evidenceIdNamespace=set?.setId,
     ),
 ){
+    private var opened=false
     private var observable=0
     private var degraded=0
     private var paused=0
@@ -61,26 +62,23 @@ class ProductionPoseFrameProcessor(
     private var activeFrameFillSum=0.0
     private var activeFrameFillCount=0
 
-    // At most one frame's completed bundles can be pending: a new frame is
-    // not accepted until the preceding durable write has succeeded.
+    private var reps=0
+    private var assisted=0
+    private var uncertain=0
+
     private data class PendingRepBundle(
         val rep:RepEvidence,
         val forms:List<FormObservation>,
         val cues:List<CueEvidenceLink>,
         val responses:List<CueResponse>,
     )
+    // At most the output of one frame is retained: no subsequent frame is
+    // admitted until this frame's complete durable bundles have been flushed.
     private val pendingReps=java.util.ArrayDeque<PendingRepBundle>()
-
-    private var reps=0
-    private var assisted=0
-    private var uncertain=0
 
     init{
         if(repository!=null){
             require(session!=null&&execution!=null&&set!=null)
-            repository.ensureSession(session)
-            repository.ensureExecution(execution)
-            repository.openSet(set,config)
         }
     }
 
@@ -90,6 +88,7 @@ class ProductionPoseFrameProcessor(
     ):ProductionFrameResult{
         flushPendingReps()
         val result=pipeline.process(frame,context)
+        if(result.movement.paused)feedback.clear()
 
         when(result.tracking.state){
             TrackingQualityState.OBSERVABLE->observable++
@@ -135,7 +134,6 @@ class ProductionPoseFrameProcessor(
             }
         }
 
-        if(result.movement.paused)feedback.clear()
         result.movement.repEvidence.forEach{rep->
             val forms=result.movement.formObservations.filter{it.repId==rep.repId}
             val cues=result.movement.cueEvents.filter{it.repId==rep.repId}.map{cue->
@@ -145,7 +143,7 @@ class ProductionPoseFrameProcessor(
                 rep,forms,cues,result.movement.cueResponses.filter{it.repId==rep.repId},
             ))
         }
-        flushPendingReps()
+        flushPendingReps(deliverFeedback=true)
         return ProductionFrameResult(frame,result,reps)
     }
 
@@ -153,23 +151,21 @@ class ProductionPoseFrameProcessor(
         endedAtUs:Long,
         endedAtEpochMs:Long=0L,
     ){
+        ensureSetOpened()
         flushPendingReps()
         pipeline.manualEnd()
         val r=repository
         val s=set
         if(r!=null&&s!=null){
             persistTracking()
-            r.finishSet(
-                SetSummary(
-                    s.setId,endedAtUs,reps,assisted,uncertain,endedAtEpochMs
-                )
-            )
+            r.finishSet(SetSummary(s.setId,endedAtUs,reps,assisted,uncertain,endedAtEpochMs))
         }
         pipeline.finalized()
         feedback.clear()
     }
 
-    private fun flushPendingReps(){
+    private fun flushPendingReps(deliverFeedback:Boolean=false){
+        if(activeStarted||pendingReps.isNotEmpty())ensureSetOpened()
         var committed=false
         while(pendingReps.isNotEmpty()){
             val bundle=pendingReps.first
@@ -179,8 +175,8 @@ class ProductionPoseFrameProcessor(
                     setId,bundle.rep,bundle.forms,bundle.cues,bundle.responses,
                 )
             }
-            // Remove only after the atomic bundle commit. A failed write retains
-            // the original IDs and evidence for retry, including during finish.
+            // Remove only after transaction success. A failed write retains the
+            // exact IDs and payload for retry, without double-counting the rep.
             pendingReps.removeFirst()
             reps++
             when(bundle.rep.classification){
@@ -189,15 +185,29 @@ class ProductionPoseFrameProcessor(
                 else->Unit
             }
             committed=true
-            bundle.cues.forEach{feedback.onCue(it.cue)}
+            // A delayed storage retry still saves cue evidence, but must not
+            // replay the old correction after tracking loss or during finish.
+            if(deliverFeedback)bundle.cues.forEach{feedback.onCue(it.cue)}
         }
         if(committed)persistTracking()
+    }
+
+    private fun ensureSetOpened(){
+        val r=repository?:return
+        if(opened)return
+        // Camera setup/ready/armed frames must not reserve a set ordinal. If
+        // the Activity is recreated there, the previous REST checkpoint can
+        // resume the same next-set number without colliding with a ghost row.
+        r.ensureSession(requireNotNull(session))
+        r.ensureExecution(requireNotNull(execution))
+        r.openSet(requireNotNull(set),config)
+        opened=true
     }
 
     private fun persistTracking(){
         val r=repository
         val s=set
-        if(r!=null&&s!=null){
+        if(r!=null&&s!=null&&opened){
             r.upsertTrackingSummary(
                 TrackingQualitySummary(
                     setId=s.setId,
