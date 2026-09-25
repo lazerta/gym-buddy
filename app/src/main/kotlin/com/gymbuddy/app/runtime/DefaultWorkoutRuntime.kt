@@ -232,7 +232,14 @@ class DefaultWorkoutRuntime(
                 onCompleted(null)
                 return@execute
             }
-            analyzer.finishSet(wallClock())
+            try{
+                analyzer.finishSet(wallClock())
+            }catch(_:Exception){
+                // Release the controller's ending state without claiming a save.
+                // Keep the original analyzer, IDs and evidence for a later retry.
+                onCompleted(null)
+                return@execute
+            }
             runCatching{calibrationLifecycle.onCompletedSet(set.setId,config)}
             synchronized(this){
                 if(currentAnalyzer===analyzer){
