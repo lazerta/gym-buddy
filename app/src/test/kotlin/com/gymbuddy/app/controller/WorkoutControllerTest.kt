@@ -5,6 +5,7 @@ import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
 import com.gymbuddy.app.runtime.WorkoutRuntimeSnapshot
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
+import com.gymbuddy.domain.persistence.CompletedSetRecord
 import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
@@ -21,6 +22,81 @@ import org.junit.Test
 import java.util.concurrent.Executor
 
 class WorkoutControllerTest {
+
+    @Test
+    fun invalidLoadsCannotCrashOrCorruptTheRestCheckpoint(){
+        val runtime=FakeRuntime(restToLoad=checkpoint(
+            actual=LoadSnapshot(40.0,"lb"),planned=LoadSnapshot(45.0,"lb"),
+            restStartedAt=123_000L,reps=8,
+        ))
+        val controller=WorkoutController(runtime)
+        val previousWrites=runtime.savedRest.size
+        listOf("-1","NaN","Infinity","1e309").forEach { value ->
+            controller.updateNextLoad(value)
+            assertEquals("45",(controller.uiState.value as WorkoutUiState.Rest).plannedNextLoadText)
+        }
+        assertEquals(previousWrites,runtime.savedRest.size)
+    }
+
+    @Test
+    fun cameraReacquisitionDuringAnActiveSetKeepsEndSetAvailable(){
+        val runtime=FakeRuntime()
+        val controller=WorkoutController(runtime)
+        controller.selectExercise("dumbbell_lateral_raise")
+        controller.onRuntimeSnapshot(WorkoutRuntimeSnapshot(
+            CameraGuidanceAction.CAMERA_READY,SetLifecycleState.ACTIVE_SET,
+            TrackingQualityState.OBSERVABLE,3,null))
+        controller.onRuntimeSnapshot(WorkoutRuntimeSnapshot(
+            CameraGuidanceAction.ADJUST_ANGLE,SetLifecycleState.CAMERA_GUIDANCE,
+            TrackingQualityState.PAUSED,3,null))
+        val state=controller.uiState.value
+        assertTrue("A camera bump must not remove the manual End Set fallback",state is WorkoutUiState.ActiveSet)
+        assertEquals(3,(state as WorkoutUiState.ActiveSet).repCount)
+        assertEquals("Tracking paused",state.trackingText)
+        controller.endSet()
+        assertEquals(1,runtime.endedSets)
+        assertTrue(controller.uiState.value is WorkoutUiState.Rest)
+    }
+
+
+
+    @Test fun restoredExerciseSummaryKeepsAllCompletedSets(){
+        val last=checkpoint(null,null,10_000L,8).copy(
+            completedSet=SetRecord("set2","exec",2,500L),
+            completedSets=listOf(
+                CompletedSetRecord(SetRecord("set1","exec",1,200L,LoadSnapshot(35.0,"lb")),10,"Keep both sides moving together."),
+                CompletedSetRecord(SetRecord("set2","exec",2,500L),8),
+            ),
+        )
+        val controller=WorkoutController(FakeRuntime(restToLoad=last))
+        controller.finishExercise()
+        val summary=controller.uiState.value as WorkoutUiState.Summary
+        assertEquals(listOf(1,2),summary.completedSets.map{it.setNumber})
+        assertEquals(listOf(10,8),summary.completedSets.map{it.reps})
+        assertEquals("35 lb",summary.completedSets.first().actualLoadText)
+        assertEquals("Keep both sides moving together.",summary.evidenceSummary)
+    }
+
+    @Test fun pendingFinalizationRecoveryUsesCommittedWallClockNotRestartTime(){
+        val recovery=ActiveSetRecovery(
+            WorkoutSessionRecord("session",0L),
+            ExerciseExecutionRecord("exec","session","smith_machine_squat",0L),
+            SetRecord("set","exec",1,0L),5,true,endedAtEpochMs=50_000L,
+        )
+        val runtime=FakeRuntime(activeRecovery=recovery)
+        val controller=WorkoutController(runtime,clock=WorkoutClock{120_000L})
+        assertEquals(50_000L,(controller.uiState.value as WorkoutUiState.Rest).restStartedAtEpochMs)
+        assertEquals(50_000L,runtime.savedRest.single().restStartedAtEpochMs)
+    }
+
+    @Test fun nextSetSetupRetainsThePreviousDurableRestCheckpointUntilActuallyActive(){
+        val runtime=FakeRuntime(restToLoad=checkpoint(null,LoadSnapshot(40.0),10_000L,8))
+        val controller=WorkoutController(runtime)
+        val clears=runtime.clearedRest
+        controller.nextSet()
+        assertEquals("Setup must not erase the only durable continuation",clears,runtime.clearedRest)
+        assertEquals(2,(controller.uiState.value as WorkoutUiState.CameraSetup).setNumber)
+    }
 
     @Test
     fun controllerIsPlainMvcControllerNotAndroidxViewModel(){
@@ -279,6 +355,7 @@ class WorkoutControllerTest {
         val sets=mutableListOf<Pair<Int,LoadSnapshot?>>()
         val savedRest=mutableListOf<RestCheckpointDraft>()
         var endedSets=0
+        var clearedRest=0
         var resumedExecutionId:String?=null
         var exportedSetId:String?=null
         var markedInterrupted:Triple<String,Long,Int>?=null
@@ -350,7 +427,7 @@ class WorkoutControllerTest {
             markedInterrupted=Triple(setId,recoveredAtEpochMs,committedReps)
         }
 
-        override fun clearRestCheckpoint()=Unit
+        override fun clearRestCheckpoint(){clearedRest++}
 
         override fun resetPersonalCalibration(
             exerciseId:String,

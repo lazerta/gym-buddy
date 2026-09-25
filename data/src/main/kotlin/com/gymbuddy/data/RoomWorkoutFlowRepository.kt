@@ -1,6 +1,7 @@
 package com.gymbuddy.data
 
 import com.gymbuddy.domain.persistence.ActiveSetRecovery
+import com.gymbuddy.domain.persistence.CompletedSetRecord
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
@@ -66,6 +67,9 @@ class RoomWorkoutFlowRepository(
             focus=state.focus,
             plannedNextLoad=loadSnapshot(state.plannedNextLoadValue,state.plannedNextLoadUnit),
             restStartedAtEpochMs=state.restStartedAtEpochMs,
+            completedSets=completedHistory(execution,set.setOrdinal).map { result ->
+                if(result.set.setId==set.setId)result.copy(focus=state.focus) else result
+            },
         )
     }
 
@@ -91,6 +95,8 @@ class RoomWorkoutFlowRepository(
             set=set.toRecord(),
             committedReps=committed,
             finalized=summary!=null,
+            endedAtEpochMs=summary?.endedAtEpochMs?:0L,
+            completedSets=completedHistory(execution,set.setOrdinal),
         )
     }
 
@@ -109,6 +115,21 @@ class RoomWorkoutFlowRepository(
     override fun clearRestCheckpoint(){
         dao.deleteWorkoutFlowState(ACTIVE_CHECKPOINT)
     }
+
+    // Only durably completed sets from this execution belong in its recovered
+    // summary. Repeated executions of the same exercise remain independent.
+    private fun completedHistory(
+        execution:ExerciseExecutionEntity,
+        throughOrdinal:Int,
+    ):List<CompletedSetRecord> = dao.completedSetIdsForSessionExercise(
+        execution.sessionId,execution.exerciseId,
+    ).map { id -> requireNotNull(dao.set(id)) }
+        .filter { it.executionId==execution.executionId && it.setOrdinal<=throughOrdinal }
+        .sortedBy { it.setOrdinal }
+        .map { set ->
+            val summary=requireNotNull(dao.setSummary(set.setId))
+            CompletedSetRecord(set.toRecord(),summary.completedReps)
+        }
 
     private fun SetEntity.toRecord()=SetRecord(
         setId,

@@ -24,6 +24,13 @@ data class RestCheckpointDraft(
     }
 }
 
+/** Durable completed results carried across runtime recreation. */
+data class CompletedSetRecord(
+    val set:SetRecord,
+    val reps:Int,
+    val focus:String="Repeat the same setup.",
+) { init { require(reps>=0); require(focus.isNotBlank()) } }
+
 data class RestCheckpoint(
     val session:WorkoutSessionRecord,
     val execution:ExerciseExecutionRecord,
@@ -32,6 +39,7 @@ data class RestCheckpoint(
     val focus:String,
     val plannedNextLoad:LoadSnapshot?,
     val restStartedAtEpochMs:Long,
+    val completedSets:List<CompletedSetRecord> = emptyList(),
 ){
     init{
         require(execution.sessionId==session.sessionId)
@@ -48,6 +56,8 @@ data class ActiveSetRecovery(
     val set:SetRecord,
     val committedReps:Int,
     val finalized:Boolean,
+    val endedAtEpochMs:Long=0L,
+    val completedSets:List<CompletedSetRecord> = emptyList(),
 ){
     init{
         require(execution.sessionId==session.sessionId)

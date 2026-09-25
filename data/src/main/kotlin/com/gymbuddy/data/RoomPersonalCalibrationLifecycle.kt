@@ -13,6 +13,8 @@ import com.gymbuddy.domain.profile.ExerciseBaselineKey
 import com.gymbuddy.domain.profile.MultiSessionCalibrationUpdater
 import com.gymbuddy.domain.profile.PersonalCalibrationProfile
 import com.gymbuddy.domain.profile.ViewClass
+import com.gymbuddy.domain.profile.SemanticHash
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -56,6 +58,8 @@ class RoomPersonalCalibrationLifecycle(
     private data class SessionAggregate(
         val evidence:CalibrationSessionEvidence,
         val setIds:Set<String>,
+        val sessionId:String,
+        val key:ExerciseBaselineKey,
         val frameFill:Double?,
     )
 
@@ -90,7 +94,9 @@ class RoomPersonalCalibrationLifecycle(
         )
         val sessionIds=listOf(session.sessionId)+priorSessionIds
         val current=safeActive()
-        val accepted=current?.evidenceReferences.orEmpty()
+        val accepted=scopedReferences(current,config)
+        // Reset/rebuild starts a fresh immutable history, never reuses an old v1.
+        val profileId=current?.calibrationProfileId?:"personal-local-"+UUID.randomUUID()
 
         val allAggregates=sessionIds.mapNotNull{sessionId->
             toSessionAggregate(
@@ -106,7 +112,7 @@ class RoomPersonalCalibrationLifecycle(
         }
 
         val proposal=updater.propose(
-            calibrationProfileId=current?.calibrationProfileId?:DEFAULT_PROFILE_ID,
+            calibrationProfileId=profileId,
             currentProfile=current,
             targetKey=targetKey,
             supportedMetricIds=supportedMetricIds,
@@ -128,9 +134,15 @@ class RoomPersonalCalibrationLifecycle(
             config=config,
             actualView=actualView,
             keepBaseVersion=movementChanged,
+            acceptedReferences=accepted,
+            profileId=profileId,
         )
 
-        val finalProfile=combined?:movementCandidate?:current
+        var finalProfile=combined?:movementCandidate?:current
+        if(finalProfile!=null && finalProfile.semanticHash!=current?.semanticHash){
+            finalProfile=withReferences(finalProfile,
+                finalProfile.evidenceReferences+accepted)
+        }
         if(
             finalProfile!=null&&
             finalProfile.semanticHash!=current?.semanticHash
@@ -181,7 +193,7 @@ class RoomPersonalCalibrationLifecycle(
             equipmentAssociations=current.equipmentAssociations,
             lateralityBaseline=current.lateralityBaseline,
             cueEffectiveness=current.cueEffectiveness,
-            evidenceReferences=current.evidenceReferences,
+            evidenceReferences=scopedReferences(current,config),
         )
         calibrationRepository.saveActive(reset)
         return true
@@ -200,12 +212,15 @@ class RoomPersonalCalibrationLifecycle(
         )
         if(setIds.isEmpty())return null
 
-        val sets=setIds.mapNotNull(evidenceRepository::loadSet)
+        val contextSets=setIds.mapNotNull(evidenceRepository::loadSet)
             .filter{it.sameAnalysisContext(config)}
-            .filter{it.tracking?.observedViewClass==targetKey.viewClass}
+        val sets=contextSets.filter{it.tracking?.observedViewClass==targetKey.viewClass}
         if(sets.isEmpty())return null
 
-        val eligibility=sessionEligibility(sets)
+        // Quality is assessed before view selection: an interrupted/mixed-view
+        // sibling attempt cannot disappear and make this workout appear clean.
+        val eligibility=if(dao.sessionHasInterruptedAttempt(sessionId))
+            CalibrationSessionEligibility.INTERRUPTED else sessionEligibility(contextSets)
         val metricSamples=linkedMapOf<String,MutableList<Double>>()
         var sawLowConfidence=false
 
@@ -244,13 +259,15 @@ class RoomPersonalCalibrationLifecycle(
 
         return SessionAggregate(
             evidence=CalibrationSessionEvidence(
-                evidenceReference="movement-session:"+sessionId,
+                evidenceReference=movementReference(sessionId,targetKey),
                 sequence=sessionOrder,
                 key=targetKey,
                 eligibility=resolvedEligibility,
                 metricSamples=metricSamples.mapValues{it.value.toList()},
             ),
             setIds=sets.map{it.set.setId}.toSet(),
+            sessionId=sessionId,
+            key=targetKey,
             frameFill=frameFills.takeIf{it.isNotEmpty()}?.average(),
         )
     }
@@ -308,11 +325,12 @@ class RoomPersonalCalibrationLifecycle(
         config:AnalysisConfig,
         actualView:ViewClass,
         keepBaseVersion:Boolean,
+        acceptedReferences:Set<String>,
+        profileId:String,
     ):PersonalCalibrationProfile?{
-        val alreadyAccepted=base?.evidenceReferences.orEmpty()
+        val alreadyAccepted=acceptedReferences+base?.evidenceReferences.orEmpty()
         val eligible=aggregates.filter{
-            val cameraRef="camera-session:"+
-                it.evidence.evidenceReference.removePrefix("movement-session:")
+            val cameraRef=cameraReference(it.sessionId,it.key)
             it.evidence.eligibility==CalibrationSessionEligibility.ELIGIBLE&&
                 it.frameFill!=null&&
                 cameraRef !in alreadyAccepted
@@ -354,10 +372,10 @@ class RoomPersonalCalibrationLifecycle(
         }
         val evidenceRefs=
             base?.evidenceReferences.orEmpty()+
-                eligible.map{"camera-session:"+it.evidence.evidenceReference.removePrefix("movement-session:")}
+                eligible.map{cameraReference(it.sessionId,it.key)}
         return PersonalCalibrationProfile.create(
             calibrationProfileId=
-                base?.calibrationProfileId?:current?.calibrationProfileId?:DEFAULT_PROFILE_ID,
+                base?.calibrationProfileId?:current?.calibrationProfileId?:profileId,
             profileVersion=version,
             sourceConfidence=max(base?.sourceConfidence?:0.0,confidence),
             normalizedBodyGeometry=base?.normalizedBodyGeometry.orEmpty(),
@@ -401,7 +419,62 @@ class RoomPersonalCalibrationLifecycle(
         }
     }
 
-    companion object{
-        private const val DEFAULT_PROFILE_ID="personal-local"
+    /** Translate legacy global markers only to the contexts they could have
+     * trained. Keep consumed evidence scoped after reset, without blocking a
+     * different exercise/equipment/view in the same workout. */
+    private fun scopedReferences(
+        profile:PersonalCalibrationProfile?, config:AnalysisConfig,
+    ):Set<String>{
+        if(profile==null)return emptySet()
+        val keys=profile.exerciseBaselines.map{it.key}.toMutableSet()
+        // A legacy null-view baseline consumed evidence for every allowed view.
+        // Resolve its scope before reset removes the baseline that establishes it.
+        profile.exerciseBaselines.map{it.key}.filter{key ->
+            key.viewClass==null &&
+                key.exerciseProfileId==config.exerciseProfile.profileId &&
+                key.exerciseProfileVersion==config.exerciseProfile.profileVersion &&
+                key.equipmentProfileId==config.equipmentProfile?.profileId
+        }.forEach{key ->
+            config.exerciseProfile.cameraProfile.allowedViewClasses.forEach{view ->
+                keys+=key.copy(viewClass=view)
+            }
+        }
+        config.exerciseProfile.cameraProfile.allowedViewClasses.forEach { view ->
+            if(PersonalCameraPriorCodec.resolve(profile,config.exerciseProfile.cameraProfile,
+                config.equipmentProfile?.profileId,view)!=null){
+                keys+=ExerciseBaselineKey(config.exerciseProfile.profileId,config.exerciseProfile.profileVersion,
+                    config.equipmentProfile?.profileId,view)
+            }
+        }
+        // Retain unscoped legacy receipts too: this exercise's config cannot
+        // decode another exercise's camera-only prior. Dropping those receipts
+        // would allow old sessions to be consumed again on its next completion.
+        return profile.evidenceReferences + profile.evidenceReferences.flatMap{ref ->
+            when {
+                ref.startsWith("movement-session:") && isLegacySessionReference(ref) ->
+                    keys.map{movementReference(ref.removePrefix("movement-session:"),it)}
+                ref.startsWith("camera-session:") && isLegacySessionReference(ref) ->
+                    keys.map{cameraReference(ref.removePrefix("camera-session:"),it)}
+                else -> listOf(ref)
+            }
+        }.toSet()
+    }
+
+    private fun withReferences(p:PersonalCalibrationProfile, refs:Set<String>)=PersonalCalibrationProfile.create(
+        p.calibrationProfileId,p.profileVersion,p.sourceConfidence,p.normalizedBodyGeometry,
+        p.cameraSetupPreferences,p.exerciseBaselines,p.equipmentAssociations,p.lateralityBaseline,
+        p.cueEffectiveness,refs,
+    )
+
+    companion object {
+        private fun contextId(key:ExerciseBaselineKey)=SemanticHash.sha256(
+            key.exerciseProfileId,key.exerciseProfileVersion.toString(),
+            key.equipmentProfileId.orEmpty(),key.viewClass?.name.orEmpty())
+        internal fun movementReference(sessionId:String,key:ExerciseBaselineKey)=
+            "movement-session:"+sessionId+":context:"+contextId(key)
+        private fun cameraReference(sessionId:String,key:ExerciseBaselineKey)=
+            "camera-session:"+sessionId+":context:"+contextId(key)
+        private fun isLegacySessionReference(ref:String)=
+            (ref.startsWith("movement-session:")||ref.startsWith("camera-session:"))&&!ref.contains(":context:")
     }
 }

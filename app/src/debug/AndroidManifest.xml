@@ -4,5 +4,6 @@
     <application android:usesCleartextTraffic="true">
         <activity android:name=".SimulatorE2EActivity" android:exported="true" />
             <activity android:name=".ProductionMovementE2EActivity" android:exported="true" />
+        <activity android:name=".RuntimeBoundaryE2EActivity" android:exported="true" />
     </application>
 </manifest>

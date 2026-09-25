@@ -6,6 +6,7 @@ import com.gymbuddy.app.runtime.WorkoutRuntimeGateway
 import com.gymbuddy.app.runtime.WorkoutRuntimeSnapshot
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
 import com.gymbuddy.domain.persistence.ActiveSetRecovery
+import com.gymbuddy.domain.persistence.CompletedSetRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
 import com.gymbuddy.domain.persistence.RestCheckpointDraft
@@ -154,7 +155,10 @@ class WorkoutController(
     @Synchronized
     fun updateNextLoad(value:String){
         val current=_uiState.value as? WorkoutUiState.Rest?:return
-        if(value.isNotEmpty()&&value.toDoubleOrNull()==null)return
+        if(value.isNotEmpty()){
+            val parsed=value.toDoubleOrNull()?:return
+            if(!parsed.isFinite()||parsed<0.0)return
+        }
         val existingUnit=restCheckpoint?.plannedNextLoad?.unit
             ?:restCheckpoint?.completedSet?.actualLoad?.unit
         val planned=parseLoad(value,existingUnit)
@@ -175,7 +179,8 @@ class WorkoutController(
         endingSet=false
         restCheckpoint=null
         runtime.beginSet(setNumber,actualLoad)
-        runtime.clearRestCheckpoint()
+        // The runtime replaces REST with ACTIVE_SET only when movement really
+        // starts. Setup/recreation must not erase the durable continuation.
         _uiState.value=WorkoutUiState.CameraSetup(
             exerciseId=current.exerciseId,
             exerciseName=current.exerciseName,
@@ -237,7 +242,10 @@ class WorkoutController(
         currentRepCount=snapshot.repCount
         latestCue=snapshot.cueText
 
-        if(snapshot.lifecycleState==SetLifecycleState.ACTIVE_SET||
+        if(_uiState.value is WorkoutUiState.Rest || _uiState.value is WorkoutUiState.Summary ||
+            _uiState.value is WorkoutUiState.ExerciseSelection)return
+        if(_uiState.value is WorkoutUiState.ActiveSet||
+            snapshot.lifecycleState==SetLifecycleState.ACTIVE_SET||
             snapshot.lifecycleState==SetLifecycleState.POSSIBLE_END||
             snapshot.lifecycleState==SetLifecycleState.FINALIZING){
             _uiState.value=WorkoutUiState.ActiveSet(
@@ -285,14 +293,14 @@ class WorkoutController(
         runtime.resumeExercise(recovery.session,recovery.execution)
         selectedExerciseId=recovery.execution.exerciseId
         actualLoad=recovery.set.actualLoad
-        completedSets.clear()
+        restoreCompletedHistory(recovery.completedSets)
         latestCue=null
         endingSet=false
 
         if(recovery.finalized){
             setNumber=recovery.set.setOrdinal
             currentRepCount=recovery.committedReps
-            val restStarted=clock.nowEpochMs()
+            val restStarted=recovery.endedAtEpochMs.takeIf{it>0L}?:clock.nowEpochMs()
             val checkpoint=RestCheckpoint(
                 session=recovery.session,
                 execution=recovery.execution,
@@ -304,12 +312,14 @@ class WorkoutController(
             )
             restCheckpoint=checkpoint
             lastCompletedSetId=recovery.set.setId
-            completedSets+=CompletedSetUiState(
-                setNumber=recovery.set.setOrdinal,
-                reps=recovery.committedReps,
-                actualLoadText=formatLoadDisplay(recovery.set.actualLoad),
-                focus=checkpoint.focus,
-            )
+            if(completedSets.none{it.setNumber==recovery.set.setOrdinal}){
+                completedSets+=CompletedSetUiState(
+                    setNumber=recovery.set.setOrdinal,
+                    reps=recovery.committedReps,
+                    actualLoadText=formatLoadDisplay(recovery.set.actualLoad),
+                    focus=checkpoint.focus,
+                )
+            }
             _uiState.value=WorkoutUiState.Rest(
                 exerciseId=recovery.execution.exerciseId,
                 exerciseName=bundle.definition.displayName,
@@ -356,13 +366,15 @@ class WorkoutController(
         latestCue=checkpoint.focus.takeUnless{it=="Repeat the same setup."}
         restCheckpoint=checkpoint
         lastCompletedSetId=checkpoint.completedSet.setId
-        completedSets.clear()
-        completedSets+=CompletedSetUiState(
-            setNumber=checkpoint.completedSet.setOrdinal,
-            reps=checkpoint.previousReps,
-            actualLoadText=formatLoadDisplay(checkpoint.completedSet.actualLoad),
-            focus=checkpoint.focus,
-        )
+        restoreCompletedHistory(checkpoint.completedSets)
+        if(completedSets.none{it.setNumber==checkpoint.completedSet.setOrdinal}){
+            completedSets+=CompletedSetUiState(
+                setNumber=checkpoint.completedSet.setOrdinal,
+                reps=checkpoint.previousReps,
+                actualLoadText=formatLoadDisplay(checkpoint.completedSet.actualLoad),
+                focus=checkpoint.focus,
+            )
+        }
         _uiState.value=WorkoutUiState.Rest(
             exerciseId=checkpoint.execution.exerciseId,
             exerciseName=bundle.definition.displayName,
@@ -373,6 +385,18 @@ class WorkoutController(
             plannedNextLoadText=formatLoadInput(checkpoint.plannedNextLoad),
             restStartedAtEpochMs=checkpoint.restStartedAtEpochMs,
         )
+    }
+
+    private fun restoreCompletedHistory(history:List<CompletedSetRecord>){
+        completedSets.clear()
+        completedSets+=history.sortedBy{it.set.setOrdinal}.map{record->
+            CompletedSetUiState(
+                setNumber=record.set.setOrdinal,
+                reps=record.reps,
+                actualLoadText=formatLoadDisplay(record.set.actualLoad),
+                focus=record.focus,
+            )
+        }
     }
 
     fun resetPersonalCalibration(onCompleted:(Boolean)->Unit={}){

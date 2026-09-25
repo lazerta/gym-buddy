@@ -32,13 +32,31 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
+      - name: Focused calibration regression tests
+        run: >-
+          gradle :data:testDebugUnitTest
+          --tests com.gymbuddy.data.RoomCalibrationContextRegressionTest
+          --tests com.gymbuddy.data.RoomLegacyCalibrationReceiptTest
+          --stacktrace
+
+      - name: Preserve focused calibration reports
+        if: always()
+        run: |
+          mkdir -p build/calibration-test-results
+          if [ -d data/build/test-results/testDebugUnitTest ]; then
+            cp -R data/build/test-results/testDebugUnitTest/. build/calibration-test-results/
+          fi
+
       - name: JVM and Room regression tests
-        run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest --stacktrace
+        if: ${{ !cancelled() }}
+        run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest --continue --stacktrace
 
       - name: Assemble debug and release APKs
+        if: ${{ !cancelled() }}
         run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
 
       - name: Verify release has no INTERNET permission
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -53,3 +71,16 @@ jobs:
             exit 1
           fi
           echo "RELEASE_NO_INTERNET_PASS"
+
+      - name: Upload JVM and calibration test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: |
+            build/calibration-test-results/
+            domain/build/test-results/
+            data/build/test-results/
+            app/build/test-results/
+          retention-days: 7
+          if-no-files-found: warn
