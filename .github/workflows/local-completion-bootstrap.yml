@@ -1,0 +1,95 @@
+name: local-completion-bootstrap
+on:
+  push:
+    branches: [review/local-completion-bootstrap-2026-09-25]
+    paths: [.github/workflows/local-completion-bootstrap.yml]
+permissions:
+  contents: read
+jobs:
+  export-local-environment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 466937a6f9ff44114164a31f24bf2a98ece186f2
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
+          path: harness-src
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Archive exact sources
+        run: |
+          mkdir -p source-export
+          git branch local-source HEAD
+          git bundle create source-export/production.bundle local-source
+          git -C harness-src branch local-source HEAD
+          git -C harness-src bundle create ../source-export/harness.bundle local-source
+          git rev-parse HEAD > source-export/production.sha
+          git -C harness-src rev-parse HEAD > source-export/harness.sha
+          sha256sum source-export/*.bundle > source-export/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completion-local-sources
+          path: source-export/
+          retention-days: 2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install pinned SDK
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+      - name: Populate dependencies and verify unchanged baseline
+        run: gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --continue --stacktrace
+      - name: Package offline build environment without credentials
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          mkdir -p toolchain-export dependency-export
+          GRADLE_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v gradle)")")")"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          tar -czf toolchain-export/jdk.tar.gz -C "$JAVA_HOME" .
+          tar -czf toolchain-export/gradle.tar.gz -C "$GRADLE_ROOT" .
+          tar -czf toolchain-export/android-sdk.tar.gz -C "$SDK_ROOT" platforms/android-36 build-tools/36.0.0 licenses
+          tar --exclude='*.lock' --exclude='gc.properties' -czf dependency-export/gradle-modules.tar.gz -C "$HOME/.gradle/caches" modules-2
+          if [ -d "$HOME/.m2/repository/org/robolectric" ]; then
+            tar -czf dependency-export/robolectric.tar.gz -C "$HOME/.m2/repository" org/robolectric
+          fi
+          sha256sum toolchain-export/*.gz > toolchain-export/SHA256SUMS
+          sha256sum dependency-export/*.gz > dependency-export/SHA256SUMS
+          du -h toolchain-export/* dependency-export/*
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: completion-local-toolchain
+          path: toolchain-export/
+          compression-level: 0
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: completion-local-dependencies
+          path: dependency-export/
+          compression-level: 0
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: completion-baseline-reports
+          path: |
+            domain/build/test-results/
+            data/build/test-results/
+            app/build/test-results/
+          retention-days: 2
