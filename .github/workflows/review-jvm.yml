@@ -1,7 +1,7 @@
 name: review-jvm
 on:
   push:
-    branches: [review/production-regressions-2026-09-24]
+    branches: [review/calibration-crosscheck-2026-09-25]
 permissions:
   contents: write
 concurrency:
@@ -24,7 +24,7 @@ jobs:
               if text is None: return None
               data=text.encode()
               return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
-          request=Path('.review/changes.b64')
+          request=Path('.review/crosscheck.b64')
           if request.exists():
               batch=json.loads(gzip.decompress(base64.b64decode(request.read_text(),validate=True)))
               changes=[]
