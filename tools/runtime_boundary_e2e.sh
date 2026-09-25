@@ -11,7 +11,7 @@ from pathlib import Path
 p=json.loads(Path("runtime-boundary-e2e.json").read_text())
 print(json.dumps(p,indent=2))
 assert p["passed"] is True, p
-assert len(p["tests"]) == 2, p
+assert len(p["tests"]) == 3, p
 print("ANDROID_RUNTIME_BOUNDARY_E2E_PASS")
 PY
     exit 0
