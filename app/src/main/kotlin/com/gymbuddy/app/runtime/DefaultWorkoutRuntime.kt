@@ -184,7 +184,11 @@ class DefaultWorkoutRuntime(
         listener:(WorkoutRuntimeSnapshot)->Unit,
     ):FrameConsumer<MPImage> =
         FrameConsumer { frame ->
-            val analyzer=currentAnalyzer?:return@FrameConsumer
+            val analyzer=currentAnalyzer
+            if(analyzer==null){
+                frame.image.close()
+                return@FrameConsumer
+            }
             try {
                 val result=analyzer.analyze(frame)
                 listener(

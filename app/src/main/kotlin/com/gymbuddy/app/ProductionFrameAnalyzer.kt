@@ -19,12 +19,20 @@ class ProductionFrameAnalyzer(
 
     @Synchronized
     override fun analyze(frame: FramePacket<MPImage>): ProductionFrameResult {
-        check(!finished && finishEpochMs==null) { "ProductionFrameAnalyzer has stopped its set" }
-        val context=observationContextProvider(frame)
-        val poseFrame = poseAnalyzer.analyze(frame)
-        lastTimestampUs = poseFrame.timestampUs
-        val active = processor ?: processorFactory(poseFrame).also { processor = it }
-        return active.process(poseFrame,context)
+        var delegatedToPoseAnalyzer = false
+        try {
+            check(!finished && finishEpochMs==null) { "ProductionFrameAnalyzer has stopped its set" }
+            val context=observationContextProvider(frame)
+            // MediaPipePoseAnalyzer closes the image even when inference fails.
+            // Until this handoff, this analyzer owns all early-exit cleanup.
+            delegatedToPoseAnalyzer = true
+            val poseFrame = poseAnalyzer.analyze(frame)
+            lastTimestampUs = poseFrame.timestampUs
+            val active = processor ?: processorFactory(poseFrame).also { processor = it }
+            return active.process(poseFrame,context)
+        } finally {
+            if (!delegatedToPoseAnalyzer) frame.image.close()
+        }
     }
 
     @Synchronized

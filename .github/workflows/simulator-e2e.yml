@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: lazerta/virtual-gym-buddy-simulator-harness
-          ref: 5558620bd0353547a51a14229edd4055c1d4afd9
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
           path: harness-src
 
       - name: Install harness server
@@ -275,5 +275,7 @@ jobs:
           path: |
             e2e-results.json
             production-movement-e2e.json
+            postmerge-integration-e2e.json
+            runtime-boundary-e2e.json
             frame-server.log
           if-no-files-found: ignore
