@@ -1,16 +1,12 @@
 name: review-jvm
-
 on:
   push:
     branches: [review/production-regressions-2026-09-24]
-
 permissions:
   contents: write
-
 concurrency:
   group: review-jvm-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -22,35 +18,45 @@ jobs:
           REVIEW_BRANCH: ${{ github.ref_name }}
         run: |
           python - <<'PY'
-          import base64, gzip, json, os, subprocess
+          import base64, gzip, hashlib, json, os, subprocess
           from pathlib import Path, PurePosixPath
-          request = Path('.review/changes.b64')
+          def blob(text):
+              if text is None: return None
+              data=text.encode()
+              return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          request=Path('.review/changes.b64')
           if request.exists():
-              batch = json.loads(gzip.decompress(base64.b64decode(request.read_text(), validate=True)))
-              changes = []
+              batch=json.loads(gzip.decompress(base64.b64decode(request.read_text(),validate=True)))
+              changes=[]
               for item in batch['files']:
-                  path = PurePosixPath(item['path'])
+                  path=PurePosixPath(item['path'])
                   assert not path.is_absolute() and '..' not in path.parts
                   assert path.parts[0] in {'app','data','domain','contracts','tools','docs'}
-                  target = Path(path)
-                  desired = item['content']
-                  actual = target.read_text() if target.exists() else None
-                  if actual == desired:
-                      continue
-                  old = subprocess.check_output(['git','hash-object',str(path)], text=True).strip() if target.exists() else None
-                  assert old == item['expected_blob'], f'Concurrent edit at {path}: {old}'
-                  changes.append((target, desired))
-              for target, desired in changes:
-                  if desired is None:
-                      target.unlink()
+                  target=Path(path)
+                  actual=target.read_text() if target.exists() else None
+                  if 'edits' in item:
+                      if blob(actual)==item['result_blob']: continue
+                      assert blob(actual)==item['expected_blob'], f'Concurrent edit at {path}'
+                      lines=(actual or '').splitlines(keepends=True)
+                      for start,end,replacement in reversed(item['edits']):
+                          lines[start:end]=replacement
+                      desired=''.join(lines)
+                      assert blob(desired)==item['result_blob'], f'Corrupted delta at {path}'
                   else:
-                      target.parent.mkdir(parents=True, exist_ok=True)
+                      desired=item['content']
+                      if actual==desired: continue
+                      assert blob(actual)==item['expected_blob'], f'Concurrent edit at {path}'
+                  changes.append((target,desired))
+              for target,desired in changes:
+                  if desired is None: target.unlink()
+                  else:
+                      target.parent.mkdir(parents=True,exist_ok=True)
                       target.write_text(desired)
               if changes:
-                  subprocess.run(['git','add','--',*[str(p) for p,_ in changes]], check=True)
-                  subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m',batch['message']], check=True)
-                  subprocess.run(['git','push','origin','HEAD:refs/heads/'+os.environ['REVIEW_BRANCH']], check=True)
-          print('REVIEW_TESTED_SOURCE_SHA='+subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip())
+                  subprocess.run(['git','add','--',*[str(p) for p,_ in changes]],check=True)
+                  subprocess.run(['git','-c','user.name=github-actions[bot]','-c','user.email=41898282+github-actions[bot]@users.noreply.github.com','commit','-m',batch['message']],check=True)
+                  subprocess.run(['git','push','origin','HEAD:refs/heads/'+os.environ['REVIEW_BRANCH']],check=True)
+          print('REVIEW_TESTED_SOURCE_SHA='+subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip())
           PY
       - uses: actions/setup-java@v4
         with:
