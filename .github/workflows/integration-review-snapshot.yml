@@ -1,0 +1,32 @@
+name: integration-review-snapshot
+on:
+  push:
+    branches: [review/postmerge-integration-2026-09-25]
+    paths: [.github/workflows/integration-review-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: af39f36f6c47f35496f512c9f05861b3b264f48f
+          path: production
+      - uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
+          path: harness
+      - run: |
+          mkdir snapshots
+          git -C production archive --format=tar.gz HEAD > snapshots/production.tar.gz
+          git -C harness archive --format=tar.gz HEAD > snapshots/harness.tar.gz
+          git -C production rev-parse HEAD > snapshots/production.sha
+          git -C harness rev-parse HEAD > snapshots/harness.sha
+          sha256sum snapshots/*.tar.gz > snapshots/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-integration-sources
+          path: snapshots/
+          retention-days: 1
