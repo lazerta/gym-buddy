@@ -5,7 +5,9 @@ import android.os.Bundle
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.gymbuddy.app.runtime.CompletedSetContext
 import com.gymbuddy.app.runtime.DefaultWorkoutRuntime
+import com.gymbuddy.data.GymBuddyDatabase
 import com.gymbuddy.data.GymBuddyDatabaseFactory
 import com.gymbuddy.data.RoomEvidenceRepository
 import com.gymbuddy.domain.persistence.*
@@ -15,7 +17,9 @@ import com.gymbuddy.frames.FrameOrigin
 import com.gymbuddy.frames.FramePacket
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONArray
 import org.json.JSONObject
@@ -36,6 +40,7 @@ class RuntimeBoundaryE2EActivity:ComponentActivity(){
             }
             test("shutdown_drains_admitted_database_work",::shutdownDrainsAdmittedWork)
             test("failed_finalization_remains_retryable",::failedFinalizationRemainsRetryable)
+            test("runtime_finalization_failure_notifies_callback_and_retries",::runtimeFinalizationFailureNotifiesCallback)
             val passed=(0 until results.length()).all{results.getJSONObject(it).getBoolean("passed")}
             val payload=JSONObject().put("schema_version",1).put("passed",passed).put("tests",results)
             filesDir.resolve("runtime-boundary-e2e.json").writeText(payload.toString())
@@ -105,6 +110,70 @@ class RuntimeBoundaryE2EActivity:ComponentActivity(){
             analyzer.finishSet(10_000L) // A successful retry is idempotent.
         } finally {
             pose.close();database.close();deleteDatabase(name)
+        }
+    }
+
+    private fun runtimeFinalizationFailureNotifiesCallback(){
+        val runtime=DefaultWorkoutRuntime(applicationContext,wallClock={10_000L})
+        // Fault injection is entirely debug-side: the real runtime, analyzer,
+        // repository and SQLite commit path execute unchanged.
+        val field=DefaultWorkoutRuntime::class.java.getDeclaredField("database").apply{isAccessible=true}
+        val database=field.get(runtime) as GymBuddyDatabase
+        fun onWorker(body:()->Unit){
+            val task=FutureTask<Unit>{body();Unit}
+            runtime.analysisExecutor.execute(task)
+            task.get(15,TimeUnit.SECONDS)
+        }
+        val firstDone=CountDownLatch(1)
+        val callbackCount=AtomicInteger()
+        val firstResult=AtomicReference<CompletedSetContext?>()
+        val escapedFailure=AtomicReference<Throwable?>()
+        val previous=Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler{thread,error->
+            if(thread.name=="gym-buddy-runtime"){
+                escapedFailure.set(error);firstDone.countDown()
+            }else previous?.uncaughtException(thread,error)
+        }
+        var setId=""
+        try {
+            onWorker{
+                runtime.beginExercise("dumbbell_lateral_raise")
+                runtime.beginSet(1,null)
+                val bitmap=Bitmap.createBitmap(64,64,Bitmap.Config.ARGB_8888)
+                runtime.frameConsumer{}.onFrame(FramePacket(
+                    1L,1_000L,64,64,FrameOrigin.VIDEO,BitmapImageBuilder(bitmap).build()))
+                val active=DefaultWorkoutRuntime::class.java.getDeclaredField("activeSet").apply{isAccessible=true}
+                setId=(active.get(runtime) as SetRecord).setId
+                database.openHelper.writableDatabase.execSQL(
+                    "CREATE TRIGGER fail_runtime_summary BEFORE INSERT ON set_summaries " +
+                    "BEGIN SELECT RAISE(ABORT, 'Injected runtime finalization failure'); END")
+            }
+            runtime.endSet{result->
+                firstResult.set(result);callbackCount.incrementAndGet();firstDone.countDown()
+            }
+            check(firstDone.await(10,TimeUnit.SECONDS)){"Finalization returned no terminal callback"}
+            check(escapedFailure.get()==null&&callbackCount.get()==1){
+                "Finalization failure escaped without notifying the controller: ${escapedFailure.get()}"
+            }
+            check(firstResult.get()==null){"Failed save was reported as completed"}
+            onWorker{
+                check(database.evidenceDao().setSummary(setId)==null)
+                database.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_runtime_summary")
+            }
+            val retried=CountDownLatch(1)
+            val completed=AtomicReference<CompletedSetContext?>()
+            runtime.endSet{result->completed.set(result);retried.countDown()}
+            check(retried.await(10,TimeUnit.SECONDS)){"Retry returned no terminal callback"}
+            check(completed.get()?.set?.setId==setId){"Retry lost the original set"}
+            onWorker{check(database.evidenceDao().setSummary(setId)!=null)}
+            check(callbackCount.get()==1){"Original failure callback was delivered more than once"}
+        } finally {
+            try {
+                onWorker{database.openHelper.writableDatabase.execSQL("DROP TRIGGER IF EXISTS fail_runtime_summary")}
+            } finally {
+                runtime.close()
+                Thread.setDefaultUncaughtExceptionHandler(previous)
+            }
         }
     }
 }
