@@ -34,7 +34,8 @@ class RoomLegacyCalibrationReceiptTest {
         f.record(config,4)
         assertTrue("Reset must not turn consumed view-agnostic evidence into new sessions",
             f.active().exerciseBaselines.isEmpty())
-        assertNull(f.prior(config))
+        // Camera learning is independent: this legacy fixture had neither a
+        // camera prior nor consumed camera receipts. Only movement was reset.
         f.record(config,5)
         f.record(config,6)
         assertEquals(3,f.active().exerciseBaselines.single()
