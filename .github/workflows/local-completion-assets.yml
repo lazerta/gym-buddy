@@ -1,0 +1,21 @@
+name: local-completion-assets
+on:
+  push:
+    branches: [review/local-completion-bootstrap-2026-09-25]
+    paths: [.github/workflows/local-completion-assets.yml]
+permissions:
+  contents: read
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          mkdir -p model-export
+          curl --fail --location --retry 3 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' -o model-export/pose_landmarker_lite.task
+          test "$(stat -c %s model-export/pose_landmarker_lite.task)" -gt 1024
+          sha256sum model-export/pose_landmarker_lite.task > model-export/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completion-local-model
+          path: model-export/
+          retention-days: 2
