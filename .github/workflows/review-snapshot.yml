@@ -1,0 +1,36 @@
+name: review-source-snapshot
+
+on:
+  push:
+    branches: [review/production-regressions-2026-09-24]
+    paths: [.github/workflows/review-snapshot.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 36e040a9774bc936f98e8889ec6a79458ee65599
+          path: production
+      - uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: 5558620bd0353547a51a14229edd4055c1d4afd9
+          path: harness
+      - name: Export tracked source only
+        run: |
+          mkdir snapshots
+          git -C production archive --format=zip --output="$GITHUB_WORKSPACE/snapshots/production.zip" HEAD
+          git -C harness archive --format=zip --output="$GITHUB_WORKSPACE/snapshots/harness.zip" HEAD
+          git -C production rev-parse HEAD > snapshots/production.sha
+          git -C harness rev-parse HEAD > snapshots/harness.sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-pinned-sources
+          path: snapshots/
+          retention-days: 3

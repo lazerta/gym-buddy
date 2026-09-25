@@ -83,3 +83,5 @@ for x in profiles:
     assert x["known_signal_frames"] > 0, x
 print("ANDROID_PRODUCTION_MOVEMENT_E2E_PASS")
 PY
+
+bash tools/runtime_boundary_e2e.sh

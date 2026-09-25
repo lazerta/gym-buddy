@@ -79,15 +79,15 @@ class ChatGptContextExporter(
             .filter{it.evidence.set.setId!=currentSetId}
             .filter{context->
                 val summary=context.evidence.summary?:return@filter false
-                val order=chronology(summary)
-                order<currentChronology||
-                    (order==currentChronology&&
+                val order=compareValuesBy(summary,currentSummary,{it.endedAtEpochMs>0},{chronology(it)})
+                order<0||
+                    (order==0&&
                         context.evidence.set.setId<currentSetId)
             }
             .sortedWith(
                 compareByDescending<ChatGptSetContext>{
-                    chronology(requireNotNull(it.evidence.summary))
-                }.thenByDescending{it.evidence.set.setId}
+                    requireNotNull(it.evidence.summary).endedAtEpochMs>0
+                }.thenByDescending{chronology(requireNotNull(it.evidence.summary))}.thenByDescending{it.evidence.set.setId}
             )
             .take(historyLimit)
 
@@ -274,6 +274,7 @@ class ChatGptContextExporter(
             obj(
                 "ended_at_us" to num(it.endedAtUs),
                 "ended_at_epoch_ms" to num(it.endedAtEpochMs),
+                "wall_clock_known" to (it.endedAtEpochMs>0).toString(),
                 "completed_reps" to num(it.completedReps),
                 "assisted_reps" to num(it.assistedReps),
                 "uncertain_reps" to num(it.uncertainReps),

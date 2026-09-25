@@ -39,6 +39,7 @@ class ProductionMovementPipeline(
             idNamespace=evidenceIdNamespace,
         )
     private var lastFrameTimestampUs: Long? = null
+    private var validatedView: ViewClass? = null
     private var lastLock = PrimarySubjectLockResult(
         PrimarySubjectLockState.TARGET_LOST,null,null,null,0
     )
@@ -46,6 +47,7 @@ class ProductionMovementPipeline(
 
     fun reset() {
         lastFrameTimestampUs = null
+        validatedView = null
         lastLock = PrimarySubjectLockResult(
             PrimarySubjectLockState.TARGET_LOST,null,null,null,0
         )
@@ -93,6 +95,21 @@ class ProductionMovementPipeline(
                 context.copy(observedViewClass = viewEstimator.estimate(target))
             } else context
 
+        // Both views may be allowed, but motion measured in one view must not
+        // complete a repetition begun in another. Reacquire before accepting it.
+        if (validatedView != null && effectiveContext.observedViewClass != validatedView) {
+            validatedView = null
+            lifecycle.invalidateCameraSetup()
+            cameraGuidanceEngine.reset()
+            trackingGate.reset()
+            return result(
+                frame.timestampUs, lock,
+                TrackingQualityResult(TrackingQualityState.PAUSED, TrackingQualityReason.WRONG_VIEW,
+                    lock.targetCandidateIndex, null, null),
+                interruptOnce(frame.timestampUs), CameraGuidanceAction.ADJUST_ANGLE,
+                effectiveContext.observedViewClass,
+            )
+        }
         val priorLifecycle = lifecycle.state
         val observedView=effectiveContext.observedViewClass
             ?:config.preferredViewClass
@@ -115,8 +132,9 @@ class ProductionMovementPipeline(
             lifecycleAfterGuidance == SetLifecycleState.CAMERA_GUIDANCE &&
             priorLifecycle != SetLifecycleState.ACTIVE_SET
         ) {
-            engine.reset()
-            interruptionGate.reset()
+            // A readiness loss invalidates only unfinished motion, never committed
+            // evidence or its ordinal within this set (including failed reacquisition).
+            interruptOnce(frame.timestampUs)
         }
         if (lifecycleAfterGuidance == SetLifecycleState.CAMERA_GUIDANCE) {
             val tracking = TrackingQualityResult(
@@ -194,7 +212,8 @@ class ProductionMovementPipeline(
         return when (val normalized = normalizer.normalize(candidate)) {
             is CoordinateNormalizationResult.Valid -> {
                 interruptionGate.reset()
-                val movement = engine.process(frame.timestampUs,normalized.pose)
+                validatedView = effectiveContext.observedViewClass
+                val movement = engine.process(frame.timestampUs,normalized.pose,validatedView)
                 lifecycle.onMovement(movement.primitives)
                 result(
                     frame.timestampUs,

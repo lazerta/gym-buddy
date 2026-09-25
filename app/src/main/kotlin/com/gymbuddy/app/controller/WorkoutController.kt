@@ -154,7 +154,10 @@ class WorkoutController(
     @Synchronized
     fun updateNextLoad(value:String){
         val current=_uiState.value as? WorkoutUiState.Rest?:return
-        if(value.isNotEmpty()&&value.toDoubleOrNull()==null)return
+        if(value.isNotEmpty()){
+            val parsed=value.toDoubleOrNull()?:return
+            if(!parsed.isFinite()||parsed<0.0)return
+        }
         val existingUnit=restCheckpoint?.plannedNextLoad?.unit
             ?:restCheckpoint?.completedSet?.actualLoad?.unit
         val planned=parseLoad(value,existingUnit)
@@ -237,7 +240,10 @@ class WorkoutController(
         currentRepCount=snapshot.repCount
         latestCue=snapshot.cueText
 
-        if(snapshot.lifecycleState==SetLifecycleState.ACTIVE_SET||
+        if(_uiState.value is WorkoutUiState.Rest || _uiState.value is WorkoutUiState.Summary ||
+            _uiState.value is WorkoutUiState.ExerciseSelection)return
+        if(_uiState.value is WorkoutUiState.ActiveSet||
+            snapshot.lifecycleState==SetLifecycleState.ACTIVE_SET||
             snapshot.lifecycleState==SetLifecycleState.POSSIBLE_END||
             snapshot.lifecycleState==SetLifecycleState.FINALIZING){
             _uiState.value=WorkoutUiState.ActiveSet(

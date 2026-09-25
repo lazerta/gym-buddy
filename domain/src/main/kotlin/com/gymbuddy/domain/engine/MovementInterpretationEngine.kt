@@ -4,6 +4,8 @@ import com.gymbuddy.domain.coaching.*
 import com.gymbuddy.domain.evidence.*
 import com.gymbuddy.domain.movement.*
 import com.gymbuddy.domain.profile.AnalysisConfig
+import com.gymbuddy.domain.profile.AnalysisConfigResolver
+import com.gymbuddy.domain.profile.ViewClass
 
 data class MovementEngineOutput(
     val timestampUs: Long,
@@ -48,7 +50,11 @@ class MovementInterpretationEngine(
         cueEngine.reset()
     }
 
-    fun process(timestampUs: Long, pose: NormalizedPose): MovementEngineOutput {
+    fun process(
+        timestampUs: Long,
+        pose: NormalizedPose,
+        observedViewClass: ViewClass? = config.preferredViewClass,
+    ): MovementEngineOutput {
         val last = lastTimestampUs
         if (last != null && timestampUs <= last) return pausedOutput(timestampUs)
         lastTimestampUs = timestampUs
@@ -73,7 +79,7 @@ class MovementInterpretationEngine(
             val rep = evidenceBuilder.build(
                 event,snapshot,config,idNamespace
             )
-            val obs = formEngine.analyze(rep, config)
+            val obs = formEngine.analyze(rep, AnalysisConfigResolver.forObservedView(config, observedViewClass))
             val cueDecision = cueEngine.evaluate(rep, obs)
             evidence += rep
             forms += obs

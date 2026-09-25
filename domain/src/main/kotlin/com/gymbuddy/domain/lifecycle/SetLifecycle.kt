@@ -10,7 +10,9 @@ class SetLifecycleController {
     var state = SetLifecycleState.CAMERA_GUIDANCE
         private set
 
-    fun reset() { state = SetLifecycleState.CAMERA_GUIDANCE }
+    private var attemptStarted=false
+
+    fun reset() { state = SetLifecycleState.CAMERA_GUIDANCE; attemptStarted=false }
 
     fun invalidateCameraSetup(): SetLifecycleState {
         if (state != SetLifecycleState.FINALIZING && state != SetLifecycleState.ENDED) {
@@ -46,6 +48,7 @@ class SetLifecycleController {
             }
             else -> state
         }
+        if(state==SetLifecycleState.ACTIVE_SET)attemptStarted=true
         return state
     }
 
@@ -65,7 +68,7 @@ class SetLifecycleController {
     }
 
     fun manualEnd(): SetLifecycleState {
-        if (state == SetLifecycleState.ACTIVE_SET || state == SetLifecycleState.POSSIBLE_END) state = SetLifecycleState.FINALIZING
+        if (attemptStarted && state != SetLifecycleState.ENDED) state = SetLifecycleState.FINALIZING
         return state
     }
 

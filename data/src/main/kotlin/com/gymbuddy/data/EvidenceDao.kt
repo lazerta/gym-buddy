@@ -50,10 +50,14 @@ import androidx.room.*
         WHERE e.exerciseId=:exerciseId
           AND s.setId!=:currentSetId
           AND (
-              (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)<:beforeEndedAtEpochMs OR
-              ((CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)=:beforeEndedAtEpochMs AND s.setId<:currentSetId)
+              (ss.endedAtEpochMs=0 AND (SELECT endedAtEpochMs FROM set_summaries WHERE setId=:currentSetId)>0) OR
+              ((ss.endedAtEpochMs>0)=((SELECT endedAtEpochMs FROM set_summaries WHERE setId=:currentSetId)>0) AND (
+                  (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)<:beforeEndedAtEpochMs OR
+                  ((CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END)=:beforeEndedAtEpochMs AND s.setId<:currentSetId)
+              ))
           )
-        ORDER BY (CASE WHEN ss.endedAtEpochMs>0 THEN ss.endedAtEpochMs ELSE ss.endedAtUs END) DESC, s.setId DESC
+        ORDER BY (ss.endedAtEpochMs>0) DESC, ss.endedAtEpochMs DESC,
+            (CASE WHEN ss.endedAtEpochMs=0 THEN ss.endedAtUs ELSE 0 END) DESC, s.setId DESC
         LIMIT :limit
     """)
     abstract fun recentComparableSetIds(
@@ -72,11 +76,15 @@ import androidx.room.*
         WHERE e.exerciseId=:exerciseId
           AND ws.sessionId!=:currentSessionId
           AND (
-              (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)<:beforeSessionStartedAtEpochMs OR
-              ((CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)=:beforeSessionStartedAtEpochMs AND ws.sessionId<:currentSessionId)
+              (ws.startedAtEpochMs=0 AND (SELECT startedAtEpochMs FROM workout_sessions WHERE sessionId=:currentSessionId)>0) OR
+              ((ws.startedAtEpochMs>0)=((SELECT startedAtEpochMs FROM workout_sessions WHERE sessionId=:currentSessionId)>0) AND (
+                  (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)<:beforeSessionStartedAtEpochMs OR
+                  ((CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END)=:beforeSessionStartedAtEpochMs AND ws.sessionId<:currentSessionId)
+              ))
           )
         GROUP BY ws.sessionId
-        ORDER BY (CASE WHEN ws.startedAtEpochMs>0 THEN ws.startedAtEpochMs ELSE ws.startedAtUs END) DESC, ws.sessionId DESC
+        ORDER BY (ws.startedAtEpochMs>0) DESC, ws.startedAtEpochMs DESC,
+            (CASE WHEN ws.startedAtEpochMs=0 THEN ws.startedAtUs ELSE 0 END) DESC, ws.sessionId DESC
         LIMIT :limit
     """)
     abstract fun recentComparableSessionIds(
@@ -99,6 +107,29 @@ import androidx.room.*
         sessionId:String,
         exerciseId:String,
     ):List<String>
+
+    @Query("""
+        SELECT EXISTS(SELECT 1 FROM interrupted_sets i JOIN sets s ON s.setId=i.setId
+            JOIN exercise_executions e ON e.executionId=s.executionId WHERE e.sessionId=:sessionId)
+    """)
+    abstract fun sessionHasInterruptedAttempt(sessionId:String):Boolean
+
+    /** Reserve an immutable version and publish it atomically. A failed active-slot
+     * write must not leave an orphan history version, and concurrent writers cannot
+     * publish an active payload different from the historical payload. */
+    @Transaction open fun publishPersonalCalibration(e:PersonalCalibrationProfileEntity) {
+        val existing=personalCalibrationHistory(e.calibrationProfileId,e.profileVersion)
+        if(existing==null){
+            val inserted=insertPersonalCalibrationHistory(PersonalCalibrationProfileHistoryEntity(
+                e.calibrationProfileId,e.profileVersion,e.semanticHash,e.payload))
+            check(inserted!=-1L){"calibration version publication conflict"}
+        }else{
+            require(existing.semanticHash==e.semanticHash && existing.payload==e.payload){
+                "published calibration version is immutable"
+            }
+        }
+        upsertPersonalCalibration(e)
+    }
 
     @Query("SELECT * FROM workout_flow_states WHERE checkpointId=:id") abstract fun workoutFlowState(id:String):WorkoutFlowStateEntity?
     @Query("DELETE FROM workout_flow_states WHERE checkpointId=:id") abstract fun deleteWorkoutFlowState(id:String)

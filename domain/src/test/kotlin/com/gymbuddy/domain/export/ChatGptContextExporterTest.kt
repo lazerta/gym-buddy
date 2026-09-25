@@ -30,6 +30,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatGptContextExporterTest {
+    @Test fun unknownLegacyUptimeCannotSortAboveOrHideDatedHistory() {
+        val exercise="incline_dumbbell_press"
+        val current=context("current","ec","sc",exercise,1000,false,1_800_000_000_000L)
+        val recent=context("recent","er","sr",exercise,2000,false,1_700_000_000_000L)
+        val legacy=context("legacy","el","sl",exercise,6_000_000_000_000L,false)
+        val exported=ChatGptContextExporter(FakeRepository(current,listOf(legacy,recent))).export("current")
+        assertTrue(exported.contains("\"set_id\":\"legacy\""))
+        assertTrue(exported.indexOf("\"set_id\":\"recent\"") < exported.indexOf("\"set_id\":\"legacy\""))
+    }
+
     @Test
     fun exportIsDeterministicAcrossInputOrderingAndFiltersNonComparableHistory(){
         val currentA=context("current","exec-current","session-current","incline_dumbbell_press",300,reverse=false)
