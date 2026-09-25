@@ -44,6 +44,10 @@ class ProductionPoseFrameProcessor(
     ),
 ){
     private var opened=false
+    private var finishing=false
+    private var finalized=false
+    private var requestedEndUs:Long?=null
+    private var requestedEndEpochMs:Long?=null
     private var observable=0
     private var degraded=0
     private var paused=0
@@ -86,6 +90,7 @@ class ProductionPoseFrameProcessor(
         frame:PoseFrame,
         context:TrackingObservationContext=TrackingObservationContext(),
     ):ProductionFrameResult{
+        check(!finishing){"The set has stopped accepting movement"}
         flushPendingReps()
         val result=pipeline.process(frame,context)
         if(result.movement.paused)feedback.clear()
@@ -151,16 +156,25 @@ class ProductionPoseFrameProcessor(
         endedAtUs:Long,
         endedAtEpochMs:Long=0L,
     ){
+        if(finalized)return
+        if(!finishing){
+            finishing=true
+            requestedEndUs=endedAtUs
+            requestedEndEpochMs=endedAtEpochMs
+            pipeline.manualEnd()
+            feedback.clear()
+        }
         ensureSetOpened()
         flushPendingReps()
-        pipeline.manualEnd()
         val r=repository
         val s=set
         if(r!=null&&s!=null){
             persistTracking()
-            r.finishSet(SetSummary(s.setId,endedAtUs,reps,assisted,uncertain,endedAtEpochMs))
+            r.finishSet(SetSummary(s.setId,requireNotNull(requestedEndUs),reps,assisted,uncertain,
+                requireNotNull(requestedEndEpochMs)))
         }
         pipeline.finalized()
+        finalized=true
         feedback.clear()
     }
 

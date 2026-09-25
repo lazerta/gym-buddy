@@ -119,8 +119,11 @@ class WorkoutController(
         val exerciseId=selectedExerciseId?:run{endingSet=false;return}
         val bundle=InitialExerciseProfiles.resolveByExternalId(exerciseId)?:run{endingSet=false;return}
         val finalLoad=context.set.actualLoad
+        // Finalization may have committed a rep that never reached a live UI
+        // snapshot after its first write failed. Room completion is authoritative.
+        currentRepCount=context.summary?.completedReps?:currentRepCount
         val focus=latestCue?:"Repeat the same setup."
-        val restStarted=clock.nowEpochMs()
+        val restStarted=context.summary?.endedAtEpochMs?.takeIf{it>0L}?:clock.nowEpochMs()
         val checkpoint=RestCheckpoint(
             session=context.session,
             execution=context.execution,

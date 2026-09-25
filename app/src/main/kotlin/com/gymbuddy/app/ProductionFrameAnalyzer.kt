@@ -15,10 +15,11 @@ class ProductionFrameAnalyzer(
     private var processor: ProductionPoseFrameProcessor? = null
     private var lastTimestampUs: Long? = null
     private var finished = false
+    private var finishEpochMs:Long? = null
 
     @Synchronized
     override fun analyze(frame: FramePacket<MPImage>): ProductionFrameResult {
-        check(!finished) { "ProductionFrameAnalyzer has already finished its set" }
+        check(!finished && finishEpochMs==null) { "ProductionFrameAnalyzer has stopped its set" }
         val context=observationContextProvider(frame)
         val poseFrame = poseAnalyzer.analyze(frame)
         lastTimestampUs = poseFrame.timestampUs
@@ -29,8 +30,9 @@ class ProductionFrameAnalyzer(
     @Synchronized
     fun finishSet(endedAtEpochMs:Long=0L) {
         if (finished) return
+        val epoch=finishEpochMs?:endedAtEpochMs.also{finishEpochMs=it}
         val timestamp = lastTimestampUs
-        if(timestamp!=null)processor?.finishSet(timestamp,endedAtEpochMs)
+        if(timestamp!=null)processor?.finishSet(timestamp,epoch)
         // A failed commit must remain retryable; completion is acknowledged only
         // after the processor successfully persists its final summary.
         finished = true

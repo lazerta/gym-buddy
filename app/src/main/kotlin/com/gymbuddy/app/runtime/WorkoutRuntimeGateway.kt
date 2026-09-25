@@ -8,6 +8,7 @@ import com.gymbuddy.domain.persistence.LoadSnapshot
 import com.gymbuddy.domain.persistence.RestCheckpoint
 import com.gymbuddy.domain.persistence.RestCheckpointDraft
 import com.gymbuddy.domain.persistence.SetRecord
+import com.gymbuddy.domain.persistence.SetSummary
 import com.gymbuddy.domain.persistence.WorkoutSessionRecord
 import com.gymbuddy.domain.profile.CameraGuidanceAction
 import com.gymbuddy.domain.tracking.TrackingQualityState
@@ -26,7 +27,10 @@ data class CompletedSetContext(
     val session:WorkoutSessionRecord,
     val execution:ExerciseExecutionRecord,
     val set:SetRecord,
-)
+    val summary:SetSummary?=null,
+){
+    init{require(summary==null||summary.setId==set.setId)}
+}
 
 interface WorkoutRuntimeGateway:AutoCloseable {
     val analysisExecutor:Executor
