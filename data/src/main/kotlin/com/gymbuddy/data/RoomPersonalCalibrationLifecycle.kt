@@ -94,7 +94,7 @@ class RoomPersonalCalibrationLifecycle(
         )
         val sessionIds=listOf(session.sessionId)+priorSessionIds
         val current=safeActive()
-        val accepted=scopedReferences(current,config,targetKey)
+        val accepted=scopedReferences(current,config)
         // Reset/rebuild starts a fresh immutable history, never reuses an old v1.
         val profileId=current?.calibrationProfileId?:"personal-local-"+UUID.randomUUID()
 
@@ -141,7 +141,7 @@ class RoomPersonalCalibrationLifecycle(
         var finalProfile=combined?:movementCandidate?:current
         if(finalProfile!=null && finalProfile.semanticHash!=current?.semanticHash){
             finalProfile=withReferences(finalProfile,
-                finalProfile.evidenceReferences.filterNot(::isLegacySessionReference).toSet()+accepted)
+                finalProfile.evidenceReferences+accepted)
         }
         if(
             finalProfile!=null&&
@@ -193,7 +193,7 @@ class RoomPersonalCalibrationLifecycle(
             equipmentAssociations=current.equipmentAssociations,
             lateralityBaseline=current.lateralityBaseline,
             cueEffectiveness=current.cueEffectiveness,
-            evidenceReferences=scopedReferences(current,config,null),
+            evidenceReferences=scopedReferences(current,config),
         )
         calibrationRepository.saveActive(reset)
         return true
@@ -423,10 +423,22 @@ class RoomPersonalCalibrationLifecycle(
      * trained. Keep consumed evidence scoped after reset, without blocking a
      * different exercise/equipment/view in the same workout. */
     private fun scopedReferences(
-        profile:PersonalCalibrationProfile?, config:AnalysisConfig, target:ExerciseBaselineKey?,
+        profile:PersonalCalibrationProfile?, config:AnalysisConfig,
     ):Set<String>{
         if(profile==null)return emptySet()
         val keys=profile.exerciseBaselines.map{it.key}.toMutableSet()
+        // A legacy null-view baseline consumed evidence for every allowed view.
+        // Resolve its scope before reset removes the baseline that establishes it.
+        profile.exerciseBaselines.map{it.key}.filter{key ->
+            key.viewClass==null &&
+                key.exerciseProfileId==config.exerciseProfile.profileId &&
+                key.exerciseProfileVersion==config.exerciseProfile.profileVersion &&
+                key.equipmentProfileId==config.equipmentProfile?.profileId
+        }.forEach{key ->
+            config.exerciseProfile.cameraProfile.allowedViewClasses.forEach{view ->
+                keys+=key.copy(viewClass=view)
+            }
+        }
         config.exerciseProfile.cameraProfile.allowedViewClasses.forEach { view ->
             if(PersonalCameraPriorCodec.resolve(profile,config.exerciseProfile.cameraProfile,
                 config.equipmentProfile?.profileId,view)!=null){
@@ -434,7 +446,10 @@ class RoomPersonalCalibrationLifecycle(
                     config.equipmentProfile?.profileId,view)
             }
         }
-        return profile.evidenceReferences.flatMap{ref ->
+        // Retain unscoped legacy receipts too: this exercise's config cannot
+        // decode another exercise's camera-only prior. Dropping those receipts
+        // would allow old sessions to be consumed again on its next completion.
+        return profile.evidenceReferences + profile.evidenceReferences.flatMap{ref ->
             when {
                 ref.startsWith("movement-session:") && isLegacySessionReference(ref) ->
                     keys.map{movementReference(ref.removePrefix("movement-session:"),it)}
