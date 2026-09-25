@@ -1,0 +1,54 @@
+name: acceptance-video-inputs
+on:
+  push:
+    branches: [infra/local-acceptance-kit-2026-09-25]
+    paths: [.github/workflows/acceptance-video-inputs.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests yt-dlp
+      - name: Acquire readable public sources without authentication
+        shell: bash
+        run: |
+          mkdir -p candidates
+          python - <<'PY'
+          import json, re, subprocess
+          from pathlib import Path
+          from urllib.parse import urljoin
+          import requests
+          root=Path('candidates')
+          pages={
+            'ymove-free':'https://ymove.app/free-exercise-videos',
+            'dvids-incline':'https://www.dvidshub.net/video/636927/dumbbell-incline-bench-press',
+            'dvids-license':'https://www.dvidshub.net/about/copyright',
+            'pexels-smith':'https://www.pexels.com/video/an-elderly-man-using-a-smith-machine-6892543/',
+            'pexels-license':'https://www.pexels.com/license/',
+          }
+          results={}
+          for key,url in pages.items():
+            try:
+              r=requests.get(url,timeout=45)
+              results[key]={'url':url,'status':r.status_code}
+              if r.status_code==200:
+                (root/(key+'.html')).write_text(r.text)
+                links=sorted(set(re.findall(r'(?:https?[^\s"<>]+\.mp4[^\s"<>]*|/api/free/[^\s"<>]+)',r.text)))
+                results[key]['media_links']=links
+            except Exception as e: results[key]={'url':url,'error':str(e)}
+          (root/'source-results.json').write_text(json.dumps(results,indent=2))
+          p=subprocess.run(['yt-dlp','--no-playlist','--no-progress','--max-filesize','100M','--write-info-json','-o',str(root/'dvids-incline.%(ext)s'),pages['dvids-incline']],capture_output=True,text=True,timeout=180)
+          (root/'dvids-acquisition.log').write_text(p.stdout+p.stderr)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-video-candidates-local-only
+          path: candidates/
+          retention-days: 1
+          compression-level: 0
