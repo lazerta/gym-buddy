@@ -1,0 +1,119 @@
+name: baseline-public-pixel-replay
+on:
+  push:
+    branches: [infra/local-acceptance-kit-2026-09-25]
+    paths: [.github/workflows/baseline-public-pixel-replay.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 466937a6f9ff44114164a31f24bf2a98ece186f2
+      - uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
+          path: harness-src
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-video-candidates-local-only
+          run-id: 36155263972
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input-a
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-video-candidates-2-local-only
+          run-id: 36156817468
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input-b
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Build unchanged baseline and prepare input pixels without oracle labels
+        run: |
+          python -m pip install -e ./harness-src
+          gradle :app:assembleDebug --stacktrace
+          mkdir -p pixel-results
+          python - <<'PY'
+          import hashlib,json,subprocess
+          from pathlib import Path
+          cases=[('dvids-incline','incline_dumbbell_press',Path('input-a/dvids-incline.mp4'),'41ef84831dff680e49df630f031e26a9462afbf2119ffd4bf6b7cfedcf7cde77','960:540:512:540'),
+                 ('ymove-lateral','dumbbell_lateral_raise',Path('input-b/lateral-raise.mp4'),'cae960bb14f10381de0cc3e29a12c69230df754c713a8a4cc75d438621995896',None)]
+          for case,exercise,path,expected,crop in cases:
+              assert hashlib.sha256(path.read_bytes()).hexdigest()==expected
+              root=Path('pixel-sessions')/case
+              (root/'frames').mkdir(parents=True)
+              (root/'no-labels').mkdir()
+              filters=([f'crop={crop}'] if crop else [])+['fps=15',"scale='if(gte(iw,ih),640,-2)':'if(gte(iw,ih),-2,640)'"]
+              subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-i',str(path),'-an','-vf',','.join(filters),'-q:v','3',str(root/'frames/%06d.jpg')],check=True)
+              images=sorted((root/'frames').glob('*.jpg'))
+              size=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=width,height','-of','json',str(images[0])],text=True))['streams'][0]
+              entries=[]
+              for i,image in enumerate(images):
+                  (root/'no-labels'/f'{i:06d}.json').write_text('{}\n')
+                  entries.append({'frame_id':i,'timestamp_us':round(i*1_000_000/15),'width':size['width'],'height':size['height'],'mime_type':'image/jpeg','image_path':'frames/'+image.name,'ground_truth_path':f'no-labels/{i:06d}.json'})
+              manifest={'schema_version':1,'session_id':case,'exercise_id':exercise,'fps':15,'width':size['width'],'height':size['height'],'source':'real-prerecorded-video','source_sha256':expected,'preprocessing':{'fps':15,'crop':crop,'max_dimension':640},'frames':entries}
+              (root/'manifest.json').write_text(json.dumps(manifest,indent=2))
+              (Path('pixel-results')/(case+'-manifest.json')).write_text(json.dumps(manifest,indent=2))
+          PY
+          cat > /tmp/pixel-replay.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+          adb reverse tcp:8790 tcp:8790
+          for case in dvids-incline ymove-lateral; do
+            python -m harness.frame_server --session "pixel-sessions/$case" --host 0.0.0.0 --port 8790 > "pixel-results/$case-server.log" 2>&1 &
+            server=$!
+            trap 'kill "$server" 2>/dev/null || true' EXIT
+            for n in $(seq 1 30); do curl -fsS http://127.0.0.1:8790/v1/session >/dev/null && break || sleep 1; done
+            expected=$(python -c "import json; print(len(json.load(open('pixel-sessions/$case/manifest.json'))['frames']))")
+            adb shell am force-stop com.gymbuddy.app
+            adb logcat -c
+            adb shell am start -W -n com.gymbuddy.app/.SimulatorE2EActivity --es simulatorBaseUrl http://127.0.0.1:8790
+            count=0
+            for n in $(seq 1 240); do
+              curl -fsS http://127.0.0.1:8790/v1/results > "pixel-results/$case-results.json"
+              count=$(python -c "import json; print(len(json.load(open('pixel-results/$case-results.json'))))")
+              [ "$count" -eq "$expected" ] && break
+              sleep 1
+            done
+            adb logcat -d > "pixel-results/$case-logcat.txt"
+            test "$count" -eq "$expected"
+            kill "$server";wait "$server" 2>/dev/null || true
+            trap - EXIT
+          done
+          SH
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash /tmp/pixel-replay.sh
+      - name: Record exact inference source
+        if: always()
+        run: |
+          git rev-parse HEAD > pixel-results/production.sha
+          git -C harness-src rev-parse HEAD > pixel-results/harness.sha
+          sha256sum app/src/main/assets/pose_landmarker_lite.task > pixel-results/model.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline-public-pixel-results
+          path: pixel-results/
+          retention-days: 1
