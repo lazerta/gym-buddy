@@ -29,8 +29,10 @@ class ProductionFrameAnalyzer(
     @Synchronized
     fun finishSet(endedAtEpochMs:Long=0L) {
         if (finished) return
+        val timestamp = lastTimestampUs
+        if(timestamp!=null)processor?.finishSet(timestamp,endedAtEpochMs)
+        // A failed commit must remain retryable; completion is acknowledged only
+        // after the processor successfully persists its final summary.
         finished = true
-        val timestamp = lastTimestampUs ?: return
-        processor?.finishSet(timestamp,endedAtEpochMs)
     }
 }

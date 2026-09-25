@@ -33,7 +33,6 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class DefaultWorkoutRuntime(
     context:Context,
@@ -343,14 +342,21 @@ class DefaultWorkoutRuntime(
         }
     }
 
+    @Synchronized
     override fun close(){
+        if(worker.isShutdown)return
         currentAnalyzer=null
-        cameraMotionSignals.clear()
-        ttsFeedback.close()
+        // Dispose on the same serialized lane, after all admitted work. Never
+        // close Room/native inference merely because a UI-thread timeout elapsed.
+        worker.execute{
+            cameraMotionSignals.clear()
+            try{
+                ttsFeedback.close()
+            }finally{
+                try{poseAnalyzer.close()}finally{database.close()}
+            }
+        }
         worker.shutdown()
-        runCatching{worker.awaitTermination(2,TimeUnit.SECONDS)}
-        poseAnalyzer.close()
-        database.close()
     }
 
     private fun loadCalibrationSync()=

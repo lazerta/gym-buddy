@@ -2,6 +2,8 @@ package com.gymbuddy.app
 
 import com.gymbuddy.domain.coaching.*
 import com.gymbuddy.domain.engine.*
+import com.gymbuddy.domain.evidence.FormObservation
+import com.gymbuddy.domain.evidence.RepEvidence
 import com.gymbuddy.domain.lifecycle.SetLifecycleState
 import com.gymbuddy.domain.persistence.*
 import com.gymbuddy.domain.pose.PoseFrame
@@ -59,6 +61,16 @@ class ProductionPoseFrameProcessor(
     private var activeFrameFillSum=0.0
     private var activeFrameFillCount=0
 
+    // At most one frame's completed bundles can be pending: a new frame is
+    // not accepted until the preceding durable write has succeeded.
+    private data class PendingRepBundle(
+        val rep:RepEvidence,
+        val forms:List<FormObservation>,
+        val cues:List<CueEvidenceLink>,
+        val responses:List<CueResponse>,
+    )
+    private val pendingReps=java.util.ArrayDeque<PendingRepBundle>()
+
     private var reps=0
     private var assisted=0
     private var uncertain=0
@@ -76,6 +88,7 @@ class ProductionPoseFrameProcessor(
         frame:PoseFrame,
         context:TrackingObservationContext=TrackingObservationContext(),
     ):ProductionFrameResult{
+        flushPendingReps()
         val result=pipeline.process(frame,context)
 
         when(result.tracking.state){
@@ -122,33 +135,17 @@ class ProductionPoseFrameProcessor(
             }
         }
 
+        if(result.movement.paused)feedback.clear()
         result.movement.repEvidence.forEach{rep->
-            reps++
-            when(rep.classification){
-                com.gymbuddy.domain.movement.RepClassification.ASSISTED->assisted++
-                com.gymbuddy.domain.movement.RepClassification.UNCERTAIN->uncertain++
-                else->Unit
+            val forms=result.movement.formObservations.filter{it.repId==rep.repId}
+            val cues=result.movement.cueEvents.filter{it.repId==rep.repId}.map{cue->
+                CueEvidenceLink(cue,forms.firstOrNull{it.ruleId==cue.ruleId}?.observationId)
             }
-            val setId=set?.setId
-            if(repository!=null&&setId!=null){
-                val forms=result.movement.formObservations.filter{it.repId==rep.repId}
-                val cueLinks=result.movement.cueEvents
-                    .filter{it.repId==rep.repId}
-                    .map{cue->
-                        CueEvidenceLink(
-                            cue,
-                            forms.firstOrNull{it.ruleId==cue.ruleId}?.observationId,
-                        )
-                    }
-                val responses=result.movement.cueResponses.filter{it.repId==rep.repId}
-                repository.persistCompletedRepBundle(
-                    setId,rep,forms,cueLinks,responses
-                )
-                persistTracking()
-            }
+            pendingReps.addLast(PendingRepBundle(
+                rep,forms,cues,result.movement.cueResponses.filter{it.repId==rep.repId},
+            ))
         }
-
-        result.movement.cueEvents.forEach(feedback::onCue)
+        flushPendingReps()
         return ProductionFrameResult(frame,result,reps)
     }
 
@@ -156,6 +153,7 @@ class ProductionPoseFrameProcessor(
         endedAtUs:Long,
         endedAtEpochMs:Long=0L,
     ){
+        flushPendingReps()
         pipeline.manualEnd()
         val r=repository
         val s=set
@@ -169,6 +167,31 @@ class ProductionPoseFrameProcessor(
         }
         pipeline.finalized()
         feedback.clear()
+    }
+
+    private fun flushPendingReps(){
+        var committed=false
+        while(pendingReps.isNotEmpty()){
+            val bundle=pendingReps.first
+            val setId=set?.setId
+            if(repository!=null&&setId!=null){
+                repository.persistCompletedRepBundle(
+                    setId,bundle.rep,bundle.forms,bundle.cues,bundle.responses,
+                )
+            }
+            // Remove only after the atomic bundle commit. A failed write retains
+            // the original IDs and evidence for retry, including during finish.
+            pendingReps.removeFirst()
+            reps++
+            when(bundle.rep.classification){
+                com.gymbuddy.domain.movement.RepClassification.ASSISTED->assisted++
+                com.gymbuddy.domain.movement.RepClassification.UNCERTAIN->uncertain++
+                else->Unit
+            }
+            committed=true
+            bundle.cues.forEach{feedback.onCue(it.cue)}
+        }
+        if(committed)persistTracking()
     }
 
     private fun persistTracking(){
