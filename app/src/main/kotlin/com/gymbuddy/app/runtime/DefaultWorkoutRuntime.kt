@@ -67,7 +67,6 @@ class DefaultWorkoutRuntime(
     private var activeExecution:ExerciseExecutionRecord?=null
     private var activeSet:SetRecord?=null
     private var activeConfig:AnalysisConfig?=null
-    private val recoveryCheckpointGate=ActiveSetRecoveryCheckpointGate()
 
     override val analysisExecutor:Executor
         get()=worker
@@ -83,7 +82,6 @@ class DefaultWorkoutRuntime(
         activeExecution=null
         activeSet=null
         activeConfig=null
-        recoveryCheckpointGate.reset()
         latestCueText=null
     }
 
@@ -109,7 +107,6 @@ class DefaultWorkoutRuntime(
         activeExecution=null
         activeSet=null
         activeConfig=null
-        recoveryCheckpointGate.reset()
         latestCueText=null
     }
 
@@ -125,7 +122,6 @@ class DefaultWorkoutRuntime(
         val setId=selectedExecutionId+":set:"+setOrdinal
         val config=configResolver.resolve(selected)
         activeConfig=config
-        recoveryCheckpointGate.reset()
         latestCueText=null
         activeSession=null
         activeExecution=null
@@ -188,15 +184,13 @@ class DefaultWorkoutRuntime(
         listener:(WorkoutRuntimeSnapshot)->Unit,
     ):FrameConsumer<MPImage> =
         FrameConsumer { frame ->
-            val analyzer=currentAnalyzer?:return@FrameConsumer
+            val analyzer=currentAnalyzer
+            if(analyzer==null){
+                frame.image.close()
+                return@FrameConsumer
+            }
             try {
                 val result=analyzer.analyze(frame)
-                if(recoveryCheckpointGate.shouldPersist(result.pipeline.lifecycleState)){
-                    val set=activeSet
-                    if(set!=null){
-                        flowRepository.saveActiveSetCheckpoint(set.setId)
-                    }
-                }
                 listener(
                     WorkoutRuntimeSnapshot(
                         cameraGuidance=result.pipeline.cameraGuidance,
@@ -232,8 +226,11 @@ class DefaultWorkoutRuntime(
                 onCompleted(null)
                 return@execute
             }
-            try{
+            val summary=try{
                 analyzer.finishSet(wallClock())
+                requireNotNull(repository.loadSet(set.setId)?.summary){
+                    "Finalization completed without a durable summary"
+                }
             }catch(_:Exception){
                 // Release the controller's ending state without claiming a save.
                 // Keep the original analyzer, IDs and evidence for a later retry.
@@ -248,11 +245,10 @@ class DefaultWorkoutRuntime(
                     activeExecution=null
                     activeSet=null
                     activeConfig=null
-                    recoveryCheckpointGate.reset()
                     latestCueText=null
                 }
             }
-            onCompleted(CompletedSetContext(session,execution,set))
+            onCompleted(CompletedSetContext(session,execution,set,summary))
         }
     }
 

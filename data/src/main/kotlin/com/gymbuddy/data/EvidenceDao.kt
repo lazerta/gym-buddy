@@ -139,7 +139,21 @@ import androidx.room.*
     @Query("SELECT * FROM personal_calibration_profile_history WHERE calibrationProfileId=:profileId AND profileVersion=:profileVersion") abstract fun personalCalibrationHistory(profileId:String,profileVersion:Int):PersonalCalibrationProfileHistoryEntity?
     @Query("DELETE FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun deletePersonalCalibration(slotId:String)
 
-    @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){insertSet(s);insertAnalysisContext(c)}
+    /** Called only when an attempt is opened, not during camera setup. Preserve
+     * the previous REST checkpoint if either the set or its recovery write fails. */
+    @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){
+        insertSet(s)
+        insertAnalysisContext(c)
+        upsertWorkoutFlowState(WorkoutFlowStateEntity(
+            checkpointId="active",
+            completedSetId=s.setId,
+            state="ACTIVE_SET",
+            focus="Active set in progress.",
+            plannedNextLoadValue=null,
+            plannedNextLoadUnit=null,
+            restStartedAtEpochMs=0L,
+        ))
+    }
     @Transaction open fun insertRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>){insertRep(r);if(s.isNotEmpty())insertSignals(s);if(m.isNotEmpty())insertMetrics(m)}
     @Transaction open fun insertCompletedRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>,o:List<FormObservationEntity>,c:List<CueEventEntity>,responses:List<CueResponseEntity>){
         insertRepBundle(r,s,m)

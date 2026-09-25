@@ -5,5 +5,6 @@
         <activity android:name=".SimulatorE2EActivity" android:exported="true" />
             <activity android:name=".ProductionMovementE2EActivity" android:exported="true" />
         <activity android:name=".RuntimeBoundaryE2EActivity" android:exported="true" />
+        <activity android:name=".PostMergeIntegrationE2EActivity" android:exported="true" />
     </application>
 </manifest>

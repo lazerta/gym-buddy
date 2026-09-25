@@ -36,7 +36,7 @@ class DumbbellLateralRaiseT21Test {
     @Test
     fun profileDeclaresFrontViewArmElevationAndBilateralTiming(){
         val profile=bundle.profile
-        assertEquals(3,profile.profileVersion)
+        assertEquals(4,profile.profileVersion)
         assertEquals(3,profile.signalProfile.profileVersion)
         assertEquals(3,profile.metricProfile.profileVersion)
         assertEquals(3,profile.formRuleSet.profileVersion)

@@ -40,9 +40,11 @@ class MovementInterpretationEngine(
     )
     private val signalHistory = ArrayDeque<MovementSignalFrame>()
     private var lastTimestampUs: Long? = null
+    private var interruptionOpen = false
 
     fun reset() {
         lastTimestampUs = null
+        interruptionOpen = false
         signalHistory.clear()
         signalExtractor.reset()
         primitiveInterpreter.reset()
@@ -61,6 +63,23 @@ class MovementInterpretationEngine(
         val signals = signalExtractor.extract(
             timestampUs,pose,resolvedSignalProfile()
         )
+        val unavailableProgress = config.exerciseProfile.movementPrimitiveSequence.steps
+            .flatMap { it.progressSignalIds }.distinct()
+            .mapNotNull { id -> signals.values[id]?.takeUnless { it.isKnown } }
+        val missingProgress = config.exerciseProfile.movementPrimitiveSequence.steps
+            .flatMap { it.progressSignalIds }.any { it !in signals.values }
+        if (missingProgress || unavailableProgress.isNotEmpty()) {
+            // A coarse landmark fraction cannot authorize an UNKNOWN primary
+            // movement signal. Reset rep, arming and cue context as one episode.
+            // A derivative's first sample needs a second valid sample to warm up;
+            // do not erase that new history indefinitely while waiting for it.
+            val warmupOnly = !missingProgress && unavailableProgress.all {
+                it.unknownReason == SignalUnknownReason.INSUFFICIENT_HISTORY
+            }
+            return interruptAcceptedTimestamp(timestampUs, resetSignals = !warmupOnly)
+                .copy(signals = signals)
+        }
+        interruptionOpen = false
         signalHistory.add(signals)
         while (signalHistory.size > 1500) signalHistory.removeFirst()
         val primitives = primitiveInterpreter.interpret(
@@ -103,8 +122,17 @@ class MovementInterpretationEngine(
         val last = lastTimestampUs
         if (last != null && timestampUs <= last) return pausedOutput(timestampUs)
         lastTimestampUs = timestampUs
+        return interruptAcceptedTimestamp(timestampUs)
+    }
+
+    private fun interruptAcceptedTimestamp(
+        timestampUs: Long,
+        resetSignals: Boolean = true,
+    ): MovementEngineOutput {
+        if (interruptionOpen) return pausedOutput(timestampUs)
+        interruptionOpen = true
         val invalid = repDetector.onInterruption(timestampUs)
-        signalExtractor.reset()
+        if (resetSignals) signalExtractor.reset()
         primitiveInterpreter.reset()
         signalHistory.clear()
         cueEngine.onInterruption()

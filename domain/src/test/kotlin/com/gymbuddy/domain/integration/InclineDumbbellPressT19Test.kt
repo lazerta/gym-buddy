@@ -30,7 +30,7 @@ class InclineDumbbellPressT19Test {
     @Test
     fun profileDeclaresPressSpecificRomTimingElbowPathAndCameraContract(){
         val profile=bundle.profile
-        assertEquals(3,profile.profileVersion)
+        assertEquals(4,profile.profileVersion)
         assertEquals(3,profile.signalProfile.profileVersion)
         assertEquals(3,profile.metricProfile.profileVersion)
         assertEquals(3,profile.formRuleSet.profileVersion)

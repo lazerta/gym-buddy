@@ -531,6 +531,6 @@ class HarnessPrimarySubjectLockContractTest {
         private const val FIXTURE_ENV=
             "GYM_BUDDY_HARNESS_IDENTITY_FIXTURE"
         private const val EXPECTED_HARNESS_COMMIT=
-            "5558620bd0353547a51a14229edd4055c1d4afd9"
+            "d8a6e9569f424c4d97ddde5d1c41df93201f163d"
     }
 }

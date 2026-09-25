@@ -5,6 +5,9 @@ import com.gymbuddy.domain.profile.*
 data class ExerciseBundle(val definition:ExerciseDefinition,val profile:ExerciseProfile,val equipment:EquipmentProfile?)
 
 object InitialExerciseProfiles {
+    // v4 records coordinated primary-signal interruption semantics. Existing
+    // metric, signal and rule definitions are unchanged; historical v3 sets
+    // retain their original provenance and are not silently reinterpreted.
     private const val PRESS_ID="incline_dumbbell_press"
     private const val SQUAT_ID="smith_machine_squat"
     private const val RAISE_ID="dumbbell_lateral_raise"
@@ -147,7 +150,7 @@ object InitialExerciseProfiles {
             primitive(PRESS_ID,MovementPrimitive.PRESS),
             metricProfile=inclinePressMetrics(),
             formRuleSet=inclinePressRules(),
-            version=3,
+            version=4,
         )
         ExerciseBundle(ExerciseDefinition(PRESS_ID,1,"$PRESS_ID-def-v1","Incline Dumbbell Press",setOf("incline db press","incline dumbbell bench press"),MovementFamily.PRESS),p,dumbbellGeneric)
     }
@@ -161,7 +164,7 @@ object InitialExerciseProfiles {
             sig,
             primitive(SQUAT_ID,MovementPrimitive.SQUAT),
             metricProfile=smithSquatMetrics(),
-            version=3,
+            version=4,
         )
         ExerciseBundle(ExerciseDefinition(SQUAT_ID,1,"$SQUAT_ID-def-v1","Smith Machine Squat",setOf("smith squat","smith_squat"),MovementFamily.SQUAT),p,smithGeneric)
     }
@@ -175,7 +178,7 @@ object InitialExerciseProfiles {
             primitive(RAISE_ID,MovementPrimitive.RAISE),
             metricProfile=lateralRaiseMetrics(),
             formRuleSet=lateralRaiseRules(),
-            version=3,
+            version=4,
         )
         ExerciseBundle(ExerciseDefinition(RAISE_ID,1,"$RAISE_ID-def-v1","Dumbbell Lateral Raise",setOf("lateral raise","db lateral raise"),MovementFamily.RAISE),p,dumbbellGeneric)
     }
