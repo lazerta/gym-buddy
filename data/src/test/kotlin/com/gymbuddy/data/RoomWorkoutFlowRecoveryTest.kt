@@ -28,6 +28,30 @@ import org.robolectric.annotation.Config
 class RoomWorkoutFlowRecoveryTest {
     private val context:Context get()=ApplicationProvider.getApplicationContext()
 
+
+    @Test fun recoveryHydratesAllCompletedSetsAndCommittedCompletionTime(){
+        val db=Room.inMemoryDatabaseBuilder(context,GymBuddyDatabase::class.java).allowMainThreadQueries().build()
+        try {
+            val dao=db.evidenceDao()
+            val evidence=RoomEvidenceRepository(dao)
+            val flow=RoomWorkoutFlowRepository(dao)
+            val b=InitialExerciseProfiles.dumbbellLateralRaise
+            val config=AnalysisConfigResolver.resolve(b.definition,b.profile,b.equipment)
+            evidence.ensureSession(WorkoutSessionRecord("session",0L))
+            evidence.ensureExecution(ExerciseExecutionRecord("exec","session",b.definition.exerciseId,0L))
+            for(i in 1..2){
+                evidence.openSet(SetRecord("set$i","exec",i,i*100L),config)
+                evidence.finishSet(SetSummary("set$i",i*1_000L,0,0,0,i*10_000L))
+            }
+            flow.saveActiveSetCheckpoint("set2")
+            val pending=flow.loadActiveSetRecovery()!!
+            assertEquals(20_000L,pending.endedAtEpochMs)
+            assertEquals(listOf("set1","set2"),pending.completedSets.map{it.set.setId})
+            flow.saveRestCheckpoint(RestCheckpointDraft("set2","Repeat the same setup.",null,20_000L))
+            assertEquals(listOf(1,2),flow.loadRestCheckpoint()!!.completedSets.map{it.set.setOrdinal})
+        } finally { db.close() }
+    }
+
     @Test
     fun unfinishedSetRecoveryPreservesCommittedRepsAndRecordsInterruption(){
         val db=Room.inMemoryDatabaseBuilder(context,GymBuddyDatabase::class.java)
