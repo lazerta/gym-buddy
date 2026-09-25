@@ -23,6 +23,42 @@ import java.util.concurrent.Executor
 class WorkoutControllerTest {
 
     @Test
+    fun invalidLoadsCannotCrashOrCorruptTheRestCheckpoint(){
+        val runtime=FakeRuntime(restToLoad=checkpoint(
+            actual=LoadSnapshot(40.0,"lb"),planned=LoadSnapshot(45.0,"lb"),
+            restStartedAt=123_000L,reps=8,
+        ))
+        val controller=WorkoutController(runtime)
+        val previousWrites=runtime.savedRest.size
+        listOf("-1","NaN","Infinity","1e309").forEach { value ->
+            controller.updateNextLoad(value)
+            assertEquals("45",(controller.uiState.value as WorkoutUiState.Rest).plannedNextLoadText)
+        }
+        assertEquals(previousWrites,runtime.savedRest.size)
+    }
+
+    @Test
+    fun cameraReacquisitionDuringAnActiveSetKeepsEndSetAvailable(){
+        val runtime=FakeRuntime()
+        val controller=WorkoutController(runtime)
+        controller.selectExercise("dumbbell_lateral_raise")
+        controller.onRuntimeSnapshot(WorkoutRuntimeSnapshot(
+            CameraGuidanceAction.CAMERA_READY,SetLifecycleState.ACTIVE_SET,
+            TrackingQualityState.OBSERVABLE,3,null))
+        controller.onRuntimeSnapshot(WorkoutRuntimeSnapshot(
+            CameraGuidanceAction.ADJUST_ANGLE,SetLifecycleState.CAMERA_GUIDANCE,
+            TrackingQualityState.PAUSED,3,null))
+        val state=controller.uiState.value
+        assertTrue("A camera bump must not remove the manual End Set fallback",state is WorkoutUiState.ActiveSet)
+        assertEquals(3,(state as WorkoutUiState.ActiveSet).repCount)
+        assertEquals("Tracking paused",state.trackingText)
+        controller.endSet()
+        assertEquals(1,runtime.endedSets)
+        assertTrue(controller.uiState.value is WorkoutUiState.Rest)
+    }
+
+
+    @Test
     fun controllerIsPlainMvcControllerNotAndroidxViewModel(){
         assertEquals(Any::class.java,WorkoutController::class.java.superclass)
     }
