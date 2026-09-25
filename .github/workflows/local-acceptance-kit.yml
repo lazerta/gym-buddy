@@ -1,0 +1,107 @@
+name: local-acceptance-kit
+on:
+  push:
+    branches: [infra/local-acceptance-kit-2026-09-25]
+    paths: [.github/workflows/local-acceptance-kit.yml]
+permissions:
+  contents: read
+jobs:
+  kit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 466937a6f9ff44114164a31f24bf2a98ece186f2
+          path: production
+      - uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
+          path: harness
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Prepare source snapshots and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p kit/sources
+          git -C production archive --format=tar.gz HEAD > kit/sources/production.tar.gz
+          git -C harness archive --format=tar.gz HEAD > kit/sources/harness.tar.gz
+          git -C production rev-parse HEAD > kit/sources/production.sha
+          git -C harness rev-parse HEAD > kit/sources/harness.sha
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+      - name: Warm baseline and UI acceptance dependencies
+        working-directory: production
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/offline-kit.init.gradle <<'GROOVY'
+          allprojects {
+              plugins.withId('com.android.application') {
+                  dependencies.add('testImplementation', 'org.robolectric:robolectric:4.16.1')
+                  dependencies.add('testImplementation', 'androidx.test:core:1.7.0')
+                  dependencies.add('testImplementation', 'androidx.compose.ui:ui-test-junit4:1.10.5')
+                  dependencies.add('debugImplementation', 'androidx.compose.ui:ui-test-manifest:1.10.5')
+              }
+          }
+          GROOVY
+          gradle --no-daemon -I /tmp/offline-kit.init.gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --continue --stacktrace
+          cp app/src/main/assets/pose_landmarker_lite.task ../kit/sources/
+      - name: Package public binary dependencies only
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --stop || true
+          mkdir -p kit/toolchain kit/dependencies
+          GRADLE_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v gradle)")")")"
+          tar -czf kit/toolchain/gradle.tar.gz -C "$GRADLE_ROOT" .
+          tar -czf kit/toolchain/jdk.tar.gz -C "$JAVA_HOME" .
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          tar -czf kit/toolchain/android-sdk.tar.gz -C "$SDK_ROOT" platforms/android-36 build-tools/36.0.0 licenses
+          tar --exclude='*.lock' --exclude='gc.properties' -czf kit/dependencies/gradle-modules.tar.gz -C "$HOME/.gradle/caches" modules-2
+          if [ -d "$HOME/.m2/repository" ]; then
+            tar -czf kit/dependencies/maven-repository.tar.gz -C "$HOME/.m2" repository
+          fi
+          sha256sum kit/sources/* kit/toolchain/* kit/dependencies/* > kit/SHA256SUMS
+          du -h kit/sources/* kit/toolchain/* kit/dependencies/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-acceptance-sources
+          path: kit/sources/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-acceptance-toolchain
+          path: kit/toolchain/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-acceptance-dependencies
+          path: kit/dependencies/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-acceptance-baseline-reports
+          path: |
+            kit/SHA256SUMS
+            production/domain/build/test-results/
+            production/data/build/test-results/
+            production/app/build/test-results/
+          retention-days: 1
