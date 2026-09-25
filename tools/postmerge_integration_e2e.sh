@@ -11,7 +11,9 @@ from pathlib import Path
 p=json.loads(Path("postmerge-integration-e2e.json").read_text())
 print(json.dumps(p,indent=2))
 expected={"attempt_checkpoint_atomicity", "stopped_set_rejects_movement", "retry_preserves_stop_time",
-          "successful_finish_is_immutable", "runtime_room_controller_rep_agreement", "rest_uses_committed_end"}
+          "successful_finish_is_immutable", "runtime_room_controller_rep_agreement", "rest_uses_committed_end",
+          "stopped_analyzer_releases_frame", "context_failure_releases_frame", "idle_runtime_releases_frame",
+          "native_inference_releases_frame_control"}
 assert len(p["tests"])==len(expected), p
 assert {t["name"] for t in p["tests"]}==expected, p
 assert all(t["passed"] is True for t in p["tests"]) and p["passed"] is True, p

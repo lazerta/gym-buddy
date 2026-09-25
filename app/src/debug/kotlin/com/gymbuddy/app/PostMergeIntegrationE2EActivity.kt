@@ -14,6 +14,7 @@ class PostMergeIntegrationE2EActivity:ComponentActivity() {
         setContentView(status)
         Thread({
             val suite=PostMergeIntegrationSuite(applicationContext)
+            val ownership=FrameOwnershipIntegrationSuite(applicationContext)
             val cases=listOf<Pair<String,()->Unit>>(
                 "attempt_checkpoint_atomicity" to suite::attemptAndRecoveryCheckpointCommitAtomically,
                 "stopped_set_rejects_movement" to suite::failedFinalizationDoesNotAdmitMoreMovement,
@@ -21,6 +22,10 @@ class PostMergeIntegrationE2EActivity:ComponentActivity() {
                 "successful_finish_is_immutable" to suite::successfulFinalizationIsImmutable,
                 "runtime_room_controller_rep_agreement" to suite::runtimeControllerAndRecoveryAgreeOnRetriedLastRep,
                 "rest_uses_committed_end" to suite::restUsesCommittedCompletionTime,
+                "stopped_analyzer_releases_frame" to ownership::stoppedAnalyzerReleasesRejectedFrame,
+                "context_failure_releases_frame" to ownership::failedObservationContextReleasesFrame,
+                "idle_runtime_releases_frame" to ownership::idleAndClosedRuntimeReleaseUnusedFrames,
+                "native_inference_releases_frame_control" to ownership::successfulNativeInferenceReleasesFrame,
             )
             val results=JSONArray()
             cases.forEach { (name,run)->
