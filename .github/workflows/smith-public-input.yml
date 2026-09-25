@@ -1,0 +1,45 @@
+name: smith-public-input
+on:
+  push:
+    branches: [infra/local-acceptance-kit-2026-09-25]
+    paths: [.github/workflows/smith-public-input.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests yt-dlp
+      - run: |
+          mkdir -p smith-candidates
+          python - <<'PY'
+          import json,subprocess,requests
+          from pathlib import Path
+          root=Path('smith-candidates')
+          sources={
+            'lifted':'https://www.lifted-training.com/lifted-start-video-library/v/gfybbna4c64epjxw2sp7hfsnpkje99',
+            'hawkes':'https://hawkesphysiotherapy.co.uk/exercise/smith-machine-squats/',
+          }
+          status={}
+          for name,url in sources.items():
+              try:
+                  r=requests.get(url,timeout=30)
+                  status[name]={'source':url,'status':r.status_code}
+                  if r.status_code!=200:continue
+                  (root/(name+'.html')).write_text(r.text)
+                  p=subprocess.run(['yt-dlp','--no-playlist','--no-progress','--max-filesize','75M','-f','worst[height>=360]/worst','--write-info-json','-o',str(root/(name+'.%(ext)s')),url],capture_output=True,text=True,timeout=180)
+                  (root/(name+'-acquisition.log')).write_text(p.stdout+p.stderr)
+              except Exception as e:status[name]={'source':url,'error':str(e)}
+          (root/'source-status.json').write_text(json.dumps(status,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smith-public-candidates-local-only
+          path: smith-candidates/
+          retention-days: 1
+          compression-level: 0
