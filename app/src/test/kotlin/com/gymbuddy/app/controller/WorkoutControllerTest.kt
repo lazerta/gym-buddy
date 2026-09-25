@@ -9,6 +9,7 @@ import com.gymbuddy.domain.persistence.CompletedSetRecord
 import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
+import com.gymbuddy.domain.persistence.LoadSource
 import com.gymbuddy.domain.persistence.RestCheckpoint
 import com.gymbuddy.domain.persistence.RestCheckpointDraft
 import com.gymbuddy.domain.persistence.SetRecord
@@ -177,7 +178,7 @@ class WorkoutControllerTest {
 
         controller.updateNextLoad("25")
         controller.nextSet()
-        assertEquals(listOf(1 to null,2 to LoadSnapshot(25.0)),runtime.sets)
+        assertEquals(listOf(1 to null,2 to LoadSnapshot(25.0,source=LoadSource.USER_ENTERED)),runtime.sets)
 
         controller.onRuntimeSnapshot(
             WorkoutRuntimeSnapshot(
