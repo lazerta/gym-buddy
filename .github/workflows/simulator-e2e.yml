@@ -164,6 +164,7 @@ jobs:
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.HarnessCameraTrackingContractTest
           --stacktrace
+          --info
 
       - name: Harness-derived primary-subject-lock contract gate
         env:
