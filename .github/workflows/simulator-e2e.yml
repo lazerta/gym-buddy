@@ -182,7 +182,7 @@ jobs:
           --stacktrace
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: Enable KVM
         shell: bash
@@ -276,6 +276,10 @@ jobs:
             e2e-results.json
             production-movement-e2e.json
             step3-review-e2e.json
+            step4-whole-workflow-e2e.json
+            process-recovery-results/
+            app/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
             postmerge-integration-e2e.json
             runtime-boundary-e2e.json
             frame-server.log

@@ -4,7 +4,10 @@ import com.gymbuddy.domain.profile.EquipmentProfile
 import com.gymbuddy.domain.profile.SemanticHash
 
 enum class LoadBasis { TOTAL, PER_IMPLEMENT, PER_SIDE, STACK, BODYWEIGHT, UNKNOWN }
-enum class LoadSource { USER_ENTERED, PLANNED, IMPORTED, RECOVERED, UNKNOWN }
+// CARRIED_FROM_PLAN is not an independent measurement of performed load.
+enum class LoadSource { USER_ENTERED, PLANNED, IMPORTED, RECOVERED, UNKNOWN, CARRIED_FROM_PLAN }
+enum class ResistanceKind { UNKNOWN, EXTERNAL_LOAD, ASSISTANCE, BODYWEIGHT }
+enum class LoadMeasurementMode { UNKNOWN, IMPLEMENT_MASS, DISPLAY_VALUE, ADDED_LOAD }
 
 data class ExerciseStartRequest(
     val actualExerciseId:String,

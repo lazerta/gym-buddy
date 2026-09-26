@@ -96,6 +96,12 @@ class ChatGptContextExporter(
             "schema" to str(SCHEMA),
             "schema_version" to num(SCHEMA_VERSION),
             "exercise_id" to str(current.execution.exerciseId),
+            "interpretation_limits" to arr(listOf(
+                "CARRIED_FROM_PLAN load is a carried value, not an independently measured or confirmed actual load.",
+                "NOT_ASSESSED assistance does not establish that a repetition was unassisted.",
+                "Use only stored known metrics and their confidence; absent trajectory or torso-motion metrics are not evidence of normal form.",
+                "Delivered-cue response is an observation association, not proof of a causal effect.",
+            ).map(::str)),
             "current_set" to setContext(current),
             "recent_comparable_history" to arr(history.map(::setContext)),
             "recovery_context" to externalContext(recoveryContext),
@@ -294,6 +300,8 @@ class ChatGptContextExporter(
                 "unit" to str(it.unit),
                 "basis" to str(it.basis.name),
                 "source" to str(it.source.name),
+                "resistance_kind" to str(it.resistanceKind.name),
+                "measurement_mode" to str(it.measurementMode.name),
             )
         }?:"null"
 
@@ -428,7 +436,7 @@ class ChatGptContextExporter(
 
     companion object {
         const val SCHEMA="gym_buddy_chatgpt_context"
-        const val SCHEMA_VERSION=1
+        const val SCHEMA_VERSION=2
         const val DEFAULT_HISTORY_LIMIT=3
     }
 }

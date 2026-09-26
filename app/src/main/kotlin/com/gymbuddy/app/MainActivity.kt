@@ -15,6 +15,7 @@ import com.gymbuddy.app.controller.WorkoutController
 import com.gymbuddy.app.controller.WorkoutDay
 import com.gymbuddy.app.runtime.CameraMotionSignalStore
 import com.gymbuddy.app.runtime.DefaultWorkoutRuntime
+import com.gymbuddy.app.runtime.AndroidWorkoutClock
 import com.gymbuddy.app.ui.GymBuddyApp
 
 class MainActivity:ComponentActivity(){
@@ -41,6 +42,7 @@ class MainActivity:ComponentActivity(){
         controller=WorkoutController(
             runtime=DefaultWorkoutRuntime(applicationContext,cameraMotionSignals),
             initialDay=initialDay,
+            clock=AndroidWorkoutClock(applicationContext),
         )
         cameraBridge=CameraSessionBridge(
             context=this,
@@ -82,6 +84,14 @@ class MainActivity:ComponentActivity(){
                 onStartNewWorkout=controller::startNewWorkout,
                 onNextLoadUnitChange=controller::updateNextLoadUnit,
                 onNextLoadBasisChange=controller::updateNextLoadBasis,
+                onNextResistanceKindChange=controller::updateNextResistanceKind,
+                onNextMeasurementModeChange=controller::updateNextMeasurementMode,
+                onRetryRestSave=controller::retryRestSave,
+                onSaveExternalAnalysis={text,recommendations,modelLabel,done->
+                    controller.recordExternalGptAnalysis(text,recommendations,modelLabel){ok->
+                        runOnUiThread{done(ok)}
+                    }
+                },
             )
         }
     }

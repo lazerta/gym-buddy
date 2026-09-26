@@ -88,3 +88,11 @@ bash tools/runtime_boundary_e2e.sh
 bash tools/postmerge_integration_e2e.sh
 bash tools/step3_review_e2e.sh
 bash tools/step4_whole_workflow_e2e.sh
+
+# Actual process kill and rendered UI/MainActivity lifecycle gates are distinct
+# from the controlled-pose clean runtime reopen exercised by Step 4.
+bash tools/step3_process_recovery_e2e.sh
+gradle :app:connectedDebugAndroidTest --stacktrace
+
+# Require per-test execution evidence even if Gradle reports zero tests.
+bash tools/step3_instrumentation_e2e.sh

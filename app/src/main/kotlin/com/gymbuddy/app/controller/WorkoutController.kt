@@ -17,7 +17,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-fun interface WorkoutClock { fun nowEpochMs():Long }
+fun interface WorkoutClock {
+    fun nowEpochMs():Long
+    fun nowElapsedMs():Long=System.nanoTime().coerceAtLeast(0L)/1_000_000L
+    fun bootId():String?=null
+}
 object SystemWorkoutClock:WorkoutClock { override fun nowEpochMs():Long=System.currentTimeMillis() }
 
 class WorkoutController(
@@ -51,6 +55,9 @@ class WorkoutController(
     private var equipmentWritePending=false
     private var equipmentEditGeneration=0L
     private var selectionError:String?=null
+    private var restWriteRevision=0L
+    private var restWritePending=false
+    private var restSaveFailed=false
 
     private var otherExerciseOpen=false
     private var searchQuery=""
@@ -181,6 +188,7 @@ class WorkoutController(
             updatedAtEpochMs=clock.nowEpochMs(),
         )
         equipmentWritePending=true
+        _uiState.value=selectionState()
         val edit=equipmentEditGeneration
         selectionRequest++
         runtime.rememberEquipmentContext(exerciseId,context){success->
@@ -206,8 +214,9 @@ class WorkoutController(
 
     @Synchronized
     fun startNewWorkout(){
-        if(recoveryPending||preparing||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
+        if(recoveryPending||preparing||equipmentWritePending||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
         preparing=true
+        _uiState.value=selectionState()
         val generation=++uiGeneration
         selectionRequest++
         runtime.startNewWorkout{success->
@@ -230,7 +239,7 @@ class WorkoutController(
 
     @Synchronized
     private fun selectExerciseInternal(exerciseId:String,plannedExerciseId:String?){
-        if(recoveryPending||preparing||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
+        if(recoveryPending||preparing||equipmentWritePending||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
         val bundle=InitialExerciseProfiles.resolveByExternalId(exerciseId)
             ?:error("Unsupported exercise_id: $exerciseId")
         val actualId=bundle.definition.exerciseId
@@ -246,6 +255,7 @@ class WorkoutController(
         currentRepCount=0
         latestCue=null
         restCheckpoint=null
+        restWriteRevision++;restWritePending=false;restSaveFailed=false
         endingSet=false
         lastCompletedSetId=null
         completedSets.clear()
@@ -253,6 +263,7 @@ class WorkoutController(
         substitutionForExerciseId=null
         searchQuery=""
         preparing=true
+        _uiState.value=selectionState()
         val generation=++uiGeneration
         runtime.prepareExercise(request){success->
             synchronized(this){
@@ -304,6 +315,7 @@ class WorkoutController(
         val focus=context.coachingSummary?.focusText?:latestCue?:"Repeat the same setup."
         val restStarted=context.summary?.endedAtEpochMs?.takeIf{it>0L}?:clock.nowEpochMs()
         val nextPlan=finalLoad?.copy(source=LoadSource.PLANNED)
+        val timeAnchor=RestClockAnchor(clock.nowElapsedMs(),clock.bootId())
         plannedLoad=nextPlan
         val checkpoint=RestCheckpoint(
             session=context.session,
@@ -313,6 +325,7 @@ class WorkoutController(
             focus=focus,
             plannedNextLoad=nextPlan,
             restStartedAtEpochMs=restStarted,
+            clockAnchor=timeAnchor,
         )
         restCheckpoint=checkpoint
         lastCompletedSetId=context.set.setId
@@ -321,6 +334,8 @@ class WorkoutController(
             reps=currentRepCount,
             actualLoadText=formatLoadDisplay(finalLoad),
             focus=focus,
+            setId=context.set.setId,
+            coachingSummary=context.coachingSummary,
         )
         _uiState.value=WorkoutUiState.Rest(
             exerciseId=exerciseId,
@@ -334,8 +349,11 @@ class WorkoutController(
             plannedNextLoadUnit=nextPlan?.unit,
             plannedNextLoadBasis=nextPlan?.basis?:LoadBasis.UNKNOWN,
             plannedNextLoadSource=LoadSource.PLANNED,
+            plannedNextResistanceKind=nextPlan?.resistanceKind?:ResistanceKind.UNKNOWN,
+            plannedNextMeasurementMode=nextPlan?.measurementMode?:LoadMeasurementMode.UNKNOWN,
+            timerAnchor=RestTimerAnchor(0,timeAnchor.elapsedRealtimeMs),
         )
-        runtime.saveRestCheckpoint(checkpoint.toDraft())
+        persistRestDraft()
         endingSet=false
     }
 
@@ -347,43 +365,82 @@ class WorkoutController(
             val parsed=value.toDoubleOrNull()?:return
             if(!parsed.isFinite()||parsed<0.0)return
         }
-        plannedLoad=parseLoad(
-            value,current.plannedNextLoadUnit,current.plannedNextLoadBasis,LoadSource.PLANNED
-        )
-        _uiState.value=current.copy(plannedNextLoadText=value)
-        restCheckpoint=restCheckpoint?.copy(plannedNextLoad=plannedLoad)
-        restCheckpoint?.let{runtime.saveRestCheckpoint(it.toDraft())}
+        updateRestDraft(current.copy(plannedNextLoadText=value))
     }
 
     @Synchronized
     fun updateNextLoadUnit(value:String){
         if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
-        val unit=value.trim().takeIf{it.isNotEmpty()}
-        plannedLoad=parseLoad(current.plannedNextLoadText,unit,current.plannedNextLoadBasis,LoadSource.PLANNED)
-        _uiState.value=current.copy(plannedNextLoadUnit=unit)
-        restCheckpoint=restCheckpoint?.copy(plannedNextLoad=plannedLoad)
-        restCheckpoint?.let{runtime.saveRestCheckpoint(it.toDraft())}
+        updateRestDraft(current.copy(plannedNextLoadUnit=value.trim().take(32).takeIf{it.isNotEmpty()}))
     }
 
     @Synchronized
     fun updateNextLoadBasis(value:LoadBasis){
         if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
-        plannedLoad=parseLoad(current.plannedNextLoadText,current.plannedNextLoadUnit,value,LoadSource.PLANNED)
-        _uiState.value=current.copy(plannedNextLoadBasis=value)
+        updateRestDraft(current.copy(plannedNextLoadBasis=value))
+    }
+
+    @Synchronized
+    fun updateNextResistanceKind(value:ResistanceKind){
+        if(preparing||closed)return
+        val current=_uiState.value as? WorkoutUiState.Rest?:return
+        updateRestDraft(current.copy(plannedNextResistanceKind=value))
+    }
+
+    @Synchronized
+    fun updateNextMeasurementMode(value:LoadMeasurementMode){
+        if(preparing||closed)return
+        val current=_uiState.value as? WorkoutUiState.Rest?:return
+        updateRestDraft(current.copy(plannedNextMeasurementMode=value))
+    }
+
+    private fun loadFromRest(current:WorkoutUiState.Rest)=parseLoad(
+        current.plannedNextLoadText,current.plannedNextLoadUnit,current.plannedNextLoadBasis,LoadSource.PLANNED,
+        current.plannedNextResistanceKind,current.plannedNextMeasurementMode,
+    )
+
+    private fun updateRestDraft(next:WorkoutUiState.Rest){
+        plannedLoad=loadFromRest(next)
+        _uiState.value=next
         restCheckpoint=restCheckpoint?.copy(plannedNextLoad=plannedLoad)
-        restCheckpoint?.let{runtime.saveRestCheckpoint(it.toDraft())}
+        persistRestDraft()
+    }
+
+    @Synchronized
+    fun retryRestSave(){
+        if(preparing||closed||restWritePending||_uiState.value !is WorkoutUiState.Rest)return
+        persistRestDraft()
+    }
+
+    private fun persistRestDraft(){
+        val checkpoint=restCheckpoint?:return
+        val current=_uiState.value as? WorkoutUiState.Rest?:return
+        val revision=++restWriteRevision
+        val generation=uiGeneration
+        restWritePending=true;restSaveFailed=false
+        _uiState.value=current.copy(savingLoad=true,loadSaveFailed=false,errorMessage=null)
+        runtime.saveRestCheckpoint(checkpoint.toDraft()){success->
+            synchronized(this){
+                if(closed||generation!=uiGeneration||revision!=restWriteRevision||
+                    restCheckpoint?.completedSet?.setId!=checkpoint.completedSet.setId)return@synchronized
+                val shown=_uiState.value as? WorkoutUiState.Rest?:return@synchronized
+                restWritePending=false;restSaveFailed=!success
+                _uiState.value=shown.copy(savingLoad=false,loadSaveFailed=!success,
+                    errorMessage=if(success)null else "Changes were not saved. Retry before continuing.")
+            }
+        }
     }
 
     @Synchronized
     fun nextSet(){
         if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
+        if(restWritePending||restSaveFailed)return
         val ordinal=current.completedSetNumber+1
-        val nextPlan=parseLoad(current.plannedNextLoadText,current.plannedNextLoadUnit,
-            current.plannedNextLoadBasis,LoadSource.PLANNED)
-        val nextActual=nextPlan?.copy(source=LoadSource.USER_ENTERED)
+        val nextPlan=loadFromRest(current)
+        val nextActual=nextPlan?.copy(source=LoadSource.CARRIED_FROM_PLAN)
         preparing=true
         _uiState.value=current.copy(busy=true,errorMessage=null)
         val generation=++uiGeneration
@@ -408,7 +465,7 @@ class WorkoutController(
 
     @Synchronized
     fun finishExercise(){
-        if(preparing||closed)return
+        if(preparing||closed||restWritePending||restSaveFailed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
         preparing=true
         _uiState.value=current.copy(busy=true,errorMessage=null)
@@ -425,21 +482,34 @@ class WorkoutController(
                 // Runtime atomically commits completion and clears its REST marker.
                 // Do not erase recovery before that transaction has succeeded.
                 restCheckpoint=null
-                val recurring=completedSets.map{it.focus}.filter{it!="Repeat the same setup."}
-                    .groupingBy{it}.eachCount().entries
-                    .sortedWith(compareByDescending<Map.Entry<String,Int>>{it.value}.thenBy{it.key})
-                    .map{it.key}
+                // Aggregate structured evidence, not just the single Rest focus.
+                val unresolved=linkedSetOf<String>()
+                completedSets.forEach{set->
+                    set.coachingSummary?.let{evidence->
+                        unresolved.removeAll(evidence.resolvedRuleIds)
+                        unresolved.addAll(evidence.recurringRuleIds)
+                    }
+                }
+                val recurring=unresolved.map(CueTextCatalog::text)
+                val responses=completedSets.flatMap{it.coachingSummary?.cueResponses.orEmpty()}
+                    .distinctBy{it.cueId}.map{response->
+                        val outcome=response.state.name.lowercase(Locale.US)
+                        "${CueTextCatalog.text(response.ruleId)} — delivered; movement response: $outcome."
+                    }
                 _uiState.value=WorkoutUiState.Summary(
                     exerciseId=current.exerciseId,exerciseName=current.exerciseName,
                     completedSets=completedSets.toList(),
-                    evidenceSummary=recurring.firstOrNull()?:current.focus,recurringEvidence=recurring,
+                    evidenceSummary=recurring.firstOrNull()
+                        ?:completedSets.lastOrNull{it.coachingSummary==null&&it.focus!="Repeat the same setup."}?.focus
+                        ?:current.focus,recurringEvidence=recurring,
+                    cueResponseEvidence=responses,
                 )
                 refreshSelection()
                 lastCompletedSetId?.let{setId->
                     runtime.loadGptAnalyses(setId){records->
-                        synchronized(this){
-                            if(closed||generation!=uiGeneration||lastCompletedSetId!=setId)return@synchronized
-                            val summary=_uiState.value as? WorkoutUiState.Summary?:return@synchronized
+                        synchronized(this) history@{
+                            if(closed||generation!=uiGeneration||lastCompletedSetId!=setId)return@history
+                            val summary=_uiState.value as? WorkoutUiState.Summary?:return@history
                             _uiState.value=summary.copy(savedAnalyses=records.map(::analysisUi))
                         }
                     }
@@ -477,7 +547,7 @@ class WorkoutController(
                 schemaVersion=1,
                 modelLabel=modelLabel,
                 createdAtEpochMs=clock.nowEpochMs(),
-                sourceSetIds=setOf(setId),
+                sourceSetIds=completedSets.mapNotNull{it.setId}.toSet()+setId,
                 summary=summary,
                 recommendations=recommendations,
             )
@@ -507,6 +577,7 @@ class WorkoutController(
         actualLoad=null
         plannedLoad=null
         restCheckpoint=null
+        restWriteRevision++;restWritePending=false;restSaveFailed=false
         endingSet=false
         lastCompletedSetId=null
         completedSets.clear()
@@ -625,7 +696,8 @@ class WorkoutController(
             lastCompletedSetId=recovery.set.setId
             if(completedSets.none{it.setNumber==recovery.set.setOrdinal}){
                 completedSets+=CompletedSetUiState(
-                    recovery.set.setOrdinal,recovery.committedReps,formatLoadDisplay(recovery.set.actualLoad),checkpoint.focus
+                    recovery.set.setOrdinal,recovery.committedReps,formatLoadDisplay(recovery.set.actualLoad),checkpoint.focus,
+                    recovery.set.setId,recovery.completedSets.lastOrNull{it.set.setId==recovery.set.setId}?.coachingSummary
                 )
             }
             plannedLoad=checkpoint.plannedNextLoad
@@ -633,8 +705,11 @@ class WorkoutController(
                 recovery.execution.exerciseId,bundle.definition.displayName,recovery.set.setOrdinal,
                 recovery.committedReps,formatLoadDisplay(recovery.set.actualLoad),checkpoint.focus,
                 formatLoadInput(plannedLoad),restStarted,plannedLoad?.unit,plannedLoad?.basis?:LoadBasis.UNKNOWN,LoadSource.RECOVERED,
+                plannedNextResistanceKind=plannedLoad?.resistanceKind?:ResistanceKind.UNKNOWN,
+                plannedNextMeasurementMode=plannedLoad?.measurementMode?:LoadMeasurementMode.UNKNOWN,
+                timerAnchor=timerFor(checkpoint),
             )
-            runtime.saveRestCheckpoint(checkpoint.toDraft())
+            persistRestDraft()
             return
         }
         runtime.markActiveSetInterrupted(recovery.set.setId,clock.nowEpochMs(),recovery.committedReps)
@@ -671,6 +746,7 @@ class WorkoutController(
             completedSets+=CompletedSetUiState(
                 checkpoint.completedSet.setOrdinal,checkpoint.previousReps,
                 formatLoadDisplay(checkpoint.completedSet.actualLoad),checkpoint.focus,
+                checkpoint.completedSet.setId,checkpoint.completedSets.lastOrNull{it.set.setId==checkpoint.completedSet.setId}?.coachingSummary,
             )
         }
         _uiState.value=WorkoutUiState.Rest(
@@ -678,13 +754,17 @@ class WorkoutController(
             checkpoint.previousReps,formatLoadDisplay(checkpoint.completedSet.actualLoad),checkpoint.focus,
             formatLoadInput(plannedLoad),checkpoint.restStartedAtEpochMs,plannedLoad?.unit,
             plannedLoad?.basis?:LoadBasis.UNKNOWN,plannedLoad?.source?:LoadSource.RECOVERED,
+            plannedNextResistanceKind=plannedLoad?.resistanceKind?:ResistanceKind.UNKNOWN,
+            plannedNextMeasurementMode=plannedLoad?.measurementMode?:LoadMeasurementMode.UNKNOWN,
+            timerAnchor=timerFor(checkpoint),
         )
     }
 
     private fun restoreCompletedHistory(history:List<CompletedSetRecord>){
         completedSets.clear()
         completedSets+=history.sortedBy{it.set.setOrdinal}.map{record->
-            CompletedSetUiState(record.set.setOrdinal,record.reps,formatLoadDisplay(record.set.actualLoad),record.focus)
+            CompletedSetUiState(record.set.setOrdinal,record.reps,formatLoadDisplay(record.set.actualLoad),record.focus,
+                record.set.setId,record.coachingSummary)
         }
     }
 
@@ -721,6 +801,7 @@ class WorkoutController(
             equipmentEditorExerciseId=equipmentEditorExerciseId,
             equipmentLabelInput=equipmentLabelInput,
             errorMessage=selectionError,
+            busy=preparing||equipmentWritePending,
         )
     }
 
@@ -761,14 +842,21 @@ class WorkoutController(
 
     private fun parseLoad(
         value:String,unit:String?=null,basis:LoadBasis=LoadBasis.UNKNOWN,source:LoadSource=LoadSource.UNKNOWN,
+        kind:ResistanceKind=ResistanceKind.UNKNOWN,mode:LoadMeasurementMode=LoadMeasurementMode.UNKNOWN,
     ):LoadSnapshot?=value.trim().takeIf{it.isNotEmpty()}?.toDoubleOrNull()?.let{
-        LoadSnapshot(it,unit,basis,source)
+        LoadSnapshot(it,unit,basis,source,kind,mode)
     }
     private fun formatLoadInput(load:LoadSnapshot?):String=load?.value?.let(::formatNumber).orEmpty()
     private fun formatLoadDisplay(load:LoadSnapshot?):String{
         if(load==null)return "—"
         val base=formatNumber(load.value)+(load.unit?.let{" $it"}?:"")
-        return if(load.basis==LoadBasis.UNKNOWN)base else "$base · ${load.basis.name.lowercase(Locale.US).replace('_',' ')}"
+        val details=listOfNotNull(
+            load.basis.takeUnless{it==LoadBasis.UNKNOWN}?.name,
+            load.resistanceKind.takeUnless{it==ResistanceKind.UNKNOWN}?.name,
+            load.measurementMode.takeUnless{it==LoadMeasurementMode.UNKNOWN}?.name,
+        ).joinToString(" · "){it.lowercase(Locale.US).replace('_',' ')}
+        val provenance=if(load.source==LoadSource.CARRIED_FROM_PLAN)" · from plan" else ""
+        return base+(if(details.isBlank())"" else " · $details")+provenance
     }
     private fun formatNumber(value:Double):String=if(value%1.0==0.0)value.toLong().toString() else value.toString()
 
@@ -777,6 +865,10 @@ class WorkoutController(
         focus=focus,
         plannedNextLoad=plannedNextLoad,
         restStartedAtEpochMs=restStartedAtEpochMs,
+        clockAnchor=clockAnchor,
+    )
+    private fun timerFor(checkpoint:RestCheckpoint)=RestTimerAnchor.restore(
+        checkpoint.restStartedAtEpochMs,checkpoint.clockAnchor,clock.nowEpochMs(),clock.nowElapsedMs(),clock.bootId(),
     )
     private fun initialCameraInstruction(viewName:String)=
         "Move phone to a ${viewName.lowercase(Locale.US).replace('_','-')} view."
@@ -796,6 +888,6 @@ class WorkoutController(
         TrackingQualityState.PAUSED,TrackingQualityState.UNKNOWN->"Tracking paused"
     }
     private fun analysisUi(record:GptAnalysisRecord)=GptAnalysisUiState(
-        record.analysisId,record.modelLabel,record.summary,record.createdAtEpochMs
+        record.analysisId,record.modelLabel,record.summary,record.createdAtEpochMs,record.recommendations
     )
 }

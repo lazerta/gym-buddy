@@ -178,7 +178,7 @@ class WorkoutControllerTest {
 
         controller.updateNextLoad("25")
         controller.nextSet()
-        assertEquals(listOf(1 to null,2 to LoadSnapshot(25.0,source=LoadSource.USER_ENTERED)),runtime.sets)
+        assertEquals(listOf(1 to null,2 to LoadSnapshot(25.0,source=LoadSource.CARRIED_FROM_PLAN)),runtime.sets)
 
         controller.onRuntimeSnapshot(
             WorkoutRuntimeSnapshot(
@@ -190,7 +190,7 @@ class WorkoutControllerTest {
             )
         )
         val active=controller.uiState.value as WorkoutUiState.ActiveSet
-        assertEquals("25",active.actualLoadText)
+        assertEquals("25 · from plan",active.actualLoadText)
     }
 
     @Test

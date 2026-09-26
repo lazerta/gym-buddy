@@ -53,7 +53,7 @@ class Step3FailureStateTest {
         c.updateNextLoad("30");r.prepareSuccess=true;c.nextSet()
         check((c.uiState.value as WorkoutUiState.CameraSetup).setNumber==2)
         check(r.nextPlanned!!.value==30.0&&r.nextActual!!.value==30.0)
-        check(r.nextPlanned!!.source==LoadSource.PLANNED&&r.nextActual!!.source==LoadSource.USER_ENTERED)
+        check(r.nextPlanned!!.source==LoadSource.PLANNED&&r.nextActual!!.source==LoadSource.CARRIED_FROM_PLAN)
     }
     private fun rest(c:WorkoutController){
         c.selectExercise("dumbbell_lateral_raise")

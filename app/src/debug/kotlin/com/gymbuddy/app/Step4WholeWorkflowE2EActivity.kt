@@ -113,7 +113,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(edited.plannedNextLoadUnit=="lb")
             check(edited.plannedNextLoadBasis==LoadBasis.PER_SIDE)
 
-            // Process death/recreation at REST. The persisted plan and substitution
+            // Clean runtime recreation at REST (not an OS process kill). The persisted plan and substitution
             // provenance must be enough to continue without any in-memory object.
             onMain{c1.close()}
             check((r1.analysisExecutor as ExecutorService).awaitTermination(15,TimeUnit.SECONDS))
@@ -162,7 +162,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(persistedSet2.actualLoad?.value==25.0)
             check(persistedSet2.actualLoad?.unit=="lb")
             check(persistedSet2.actualLoad?.basis==LoadBasis.PER_SIDE)
-            check(persistedSet2.actualLoad?.source==LoadSource.USER_ENTERED)
+            check(persistedSet2.actualLoad?.source==LoadSource.CARRIED_FROM_PLAN)
             check(persistedSet2.plannedLoad?.source==LoadSource.PLANNED)
 
             onMain{c2.finishExercise()}
@@ -209,7 +209,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(json.contains("\"planned_exercise_id\":\"$PLANNED\""))
             check(json.contains("\"equipment_context_id\":\"$equipmentId\""))
             check(json.contains("\"basis\":\"PER_SIDE\""))
-            check(json.contains("\"source\":\"USER_ENTERED\""))
+            check(json.contains("\"source\":\"CARRIED_FROM_PLAN\""))
             check(json.contains("\"source\":\"PLANNED\""))
             check(json.contains("\"assistance_assessment\":\"NOT_ASSESSED\""))
             check(json.contains("\"invalid_attempts\":[{"))

@@ -239,6 +239,19 @@ object GymBuddyMigrations {
         }
     }
 
+    val MIGRATION_8_9 = object:Migration(8,9){
+        override fun migrate(db:SupportSQLiteDatabase){
+            listOf("actualResistanceKind","actualMeasurementMode","plannedResistanceKind","plannedMeasurementMode").forEach{
+                db.execSQL("ALTER TABLE `sets` ADD COLUMN `$it` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            }
+            listOf("plannedNextResistanceKind","plannedNextMeasurementMode").forEach{
+                db.execSQL("ALTER TABLE `workout_flow_states` ADD COLUMN `$it` TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            }
+            db.execSQL("ALTER TABLE `workout_flow_states` ADD COLUMN `restStartedAtElapsedMs` INTEGER")
+            db.execSQL("ALTER TABLE `workout_flow_states` ADD COLUMN `restBootId` TEXT")
+        }
+    }
+
     val ALL = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -247,5 +260,6 @@ object GymBuddyMigrations {
         MIGRATION_5_6,
         MIGRATION_6_7,
         MIGRATION_7_8,
+        MIGRATION_8_9,
     )
 }

@@ -1,10 +1,14 @@
 package com.gymbuddy.domain.persistence
 
+import com.gymbuddy.domain.evidence.SetCoachingSummary
+
 data class LoadSnapshot(
     val value:Double,
     val unit:String?=null,
     val basis:LoadBasis=LoadBasis.UNKNOWN,
     val source:LoadSource=LoadSource.UNKNOWN,
+    val resistanceKind:ResistanceKind=ResistanceKind.UNKNOWN,
+    val measurementMode:LoadMeasurementMode=LoadMeasurementMode.UNKNOWN,
 ){
     init{
         require(value.isFinite()){"load value must be finite"}
@@ -18,6 +22,7 @@ data class RestCheckpointDraft(
     val focus:String,
     val plannedNextLoad:LoadSnapshot?,
     val restStartedAtEpochMs:Long,
+    val clockAnchor:RestClockAnchor?=null,
 ){
     init{
         require(completedSetId.isNotBlank())
@@ -31,6 +36,7 @@ data class CompletedSetRecord(
     val set:SetRecord,
     val reps:Int,
     val focus:String="Repeat the same setup.",
+    val coachingSummary:SetCoachingSummary?=null,
 ) { init { require(reps>=0); require(focus.isNotBlank()) } }
 
 data class RestCheckpoint(
@@ -42,6 +48,7 @@ data class RestCheckpoint(
     val plannedNextLoad:LoadSnapshot?,
     val restStartedAtEpochMs:Long,
     val completedSets:List<CompletedSetRecord> = emptyList(),
+    val clockAnchor:RestClockAnchor?=null,
 ){
     init{
         require(execution.sessionId==session.sessionId)
