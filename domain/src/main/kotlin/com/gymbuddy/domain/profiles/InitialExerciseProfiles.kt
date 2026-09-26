@@ -18,7 +18,7 @@ object InitialExerciseProfiles {
     private fun camera(id:String,version:Int,preferred:ViewClass,allowed:Set<ViewClass>,required:Set<String>)=CameraProfile(
         "$id-camera",version,"$id-camera-v$version",preferred,allowed,setOf(LensFacing.BACK),
         required.map{LandmarkRequirement(it,.55,.50)}.toSet(),NumericRange(.20,.95),.80,350,
-        setOf(CameraGuidanceAction.CAMERA_READY,CameraGuidanceAction.CANNOT_ASSESS,CameraGuidanceAction.MOVE_CLOSER,CameraGuidanceAction.MOVE_FARTHER,CameraGuidanceAction.ADJUST_ANGLE)
+        CameraGuidanceAction.entries.toSet(),NumericRange(.32,.68),NumericRange(.32,.68)
     )
     private fun cue(id:String)=CuePolicy("$id-cue",1,"$id-cue-v1",3,2,15_000,2)
     private fun bilateralSignals(id:String,left:List<String>,right:List<String>,scale:Double,offset:Double)=SignalProfile(
@@ -145,12 +145,12 @@ object InitialExerciseProfiles {
         val p=profile(
             PRESS_ID,
             EquipmentType.DUMBBELL,
-            camera(PRESS_ID,2,ViewClass.SIDE_OBLIQUE,setOf(ViewClass.SIDE_OBLIQUE,ViewClass.SIDE),req),
+            camera(PRESS_ID,3,ViewClass.SIDE_OBLIQUE,setOf(ViewClass.SIDE_OBLIQUE,ViewClass.SIDE),req),
             inclinePressSignals(),
             primitive(PRESS_ID,MovementPrimitive.PRESS),
             metricProfile=inclinePressMetrics(),
             formRuleSet=inclinePressRules(),
-            version=4,
+            version=5,
         )
         ExerciseBundle(ExerciseDefinition(PRESS_ID,1,"$PRESS_ID-def-v1","Incline Dumbbell Press",setOf("incline db press","incline dumbbell bench press"),MovementFamily.PRESS),p,dumbbellGeneric)
     }
@@ -160,11 +160,11 @@ object InitialExerciseProfiles {
         val p=profile(
             SQUAT_ID,
             EquipmentType.SMITH_MACHINE,
-            camera(SQUAT_ID,2,ViewClass.SIDE,setOf(ViewClass.SIDE,ViewClass.SIDE_OBLIQUE),req),
+            camera(SQUAT_ID,3,ViewClass.SIDE,setOf(ViewClass.SIDE,ViewClass.SIDE_OBLIQUE),req),
             sig,
             primitive(SQUAT_ID,MovementPrimitive.SQUAT),
             metricProfile=smithSquatMetrics(),
-            version=4,
+            version=5,
         )
         ExerciseBundle(ExerciseDefinition(SQUAT_ID,1,"$SQUAT_ID-def-v1","Smith Machine Squat",setOf("smith squat","smith_squat"),MovementFamily.SQUAT),p,smithGeneric)
     }
@@ -173,12 +173,12 @@ object InitialExerciseProfiles {
         val p=profile(
             RAISE_ID,
             EquipmentType.DUMBBELL,
-            camera(RAISE_ID,2,ViewClass.FRONT,setOf(ViewClass.FRONT,ViewClass.FRONT_OBLIQUE),req),
+            camera(RAISE_ID,3,ViewClass.FRONT,setOf(ViewClass.FRONT,ViewClass.FRONT_OBLIQUE),req),
             lateralRaiseSignals(),
             primitive(RAISE_ID,MovementPrimitive.RAISE),
             metricProfile=lateralRaiseMetrics(),
             formRuleSet=lateralRaiseRules(),
-            version=4,
+            version=5,
         )
         ExerciseBundle(ExerciseDefinition(RAISE_ID,1,"$RAISE_ID-def-v1","Dumbbell Lateral Raise",setOf("lateral raise","db lateral raise"),MovementFamily.RAISE),p,dumbbellGeneric)
     }
