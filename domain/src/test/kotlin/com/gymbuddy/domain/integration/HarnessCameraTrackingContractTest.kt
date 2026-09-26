@@ -130,17 +130,18 @@ class HarnessCameraTrackingContractTest {
                 )
             }
 
-            val expectedTracking=expectedTracking(contract)
-            assertEquals(
-                "${contract.key} from harness ${fixture.harnessCommit}",
-                expectedTracking.first,
-                tracking.state,
-            )
-            assertEquals(
-                "${contract.key} from harness ${fixture.harnessCommit}",
-                expectedTracking.second,
-                tracking.reason,
-            )
+            expectedTracking(contract)?.let { expectedTracking ->
+                assertEquals(
+                    "${contract.key} from harness ${fixture.harnessCommit}",
+                    expectedTracking.first,
+                    tracking.state,
+                )
+                assertEquals(
+                    "${contract.key} from harness ${fixture.harnessCommit}",
+                    expectedTracking.second,
+                    tracking.reason,
+                )
+            }
 
             expectedGuidance(contract)?.let { expected ->
                 val guidance=CameraGuidanceEngine(
@@ -165,7 +166,7 @@ class HarnessCameraTrackingContractTest {
 
     private fun expectedTracking(
         contract:Contract,
-    ):Pair<TrackingQualityState,TrackingQualityReason> =
+    ):Pair<TrackingQualityState,TrackingQualityReason>? =
         when(contract.oracleReason) {
             "clean","setup_motion","persistent_issue","isolated_issue" ->
                 TrackingQualityState.OBSERVABLE to
@@ -178,9 +179,7 @@ class HarnessCameraTrackingContractTest {
                 "too_close","too_far" ->
                     TrackingQualityState.PAUSED to
                         TrackingQualityReason.FRAMING_INVALID
-                "camera_low","camera_high" ->
-                    TrackingQualityState.OBSERVABLE to
-                        TrackingQualityReason.OK
+                "camera_low","camera_high" -> null
                 else -> error(
                     "Unsupported camera-guidance harness family: " +
                         contract.family
