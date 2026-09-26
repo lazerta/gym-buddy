@@ -167,8 +167,13 @@ internal class PostMergeIntegrationSuite(private val context:Context) {
             })
             worker {};worker {} // drain both stages of asynchronous restart lookup
             val c=requireNotNull(controller)
+            worker { c.selectExercise("dumbbell_lateral_raise") }
+            // Selection now prepares its real Room/native state asynchronously.
+            // Drain that admitted command before delivering a frame, exactly as
+            // the UI waits for CameraSetup; do not bypass the runtime callback.
+            worker {}
+            check(c.uiState.value is WorkoutUiState.CameraSetup)
             val rig=worker {
-                c.selectExercise("dumbbell_lateral_raise")
                 val bitmap=Bitmap.createBitmap(64,64,Bitmap.Config.ARGB_8888)
                 c.frameConsumer().onFrame(FramePacket(0L,0L,64,64,FrameOrigin.VIDEO,
                     BitmapImageBuilder(bitmap).build()))

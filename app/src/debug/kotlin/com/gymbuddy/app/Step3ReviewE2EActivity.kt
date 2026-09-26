@@ -26,6 +26,7 @@ class Step3ReviewE2EActivity:ComponentActivity() {
         Thread({
             val tests=listOf<Pair<String,()->Unit>>(
                 "selection_leaves_ui_thread_free" to ::selectionLeavesUiThreadFree,
+                "selection_failure_rolls_back_and_retries" to ::selectionFailureRestoresStateAndRetries,
                 "reset_targets_selected_equipment" to ::resetTargetsSelectedEquipment,
                 "new_workout_failure_is_atomic" to ::newWorkoutFailureIsAtomic,
                 "completion_uses_durable_set_count" to ::completionUsesDurableSetCount,
@@ -60,6 +61,38 @@ class Step3ReviewE2EActivity:ComponentActivity() {
         worker(r) {
             check(field(r,"currentAnalyzer")!=null)
             check(db.evidenceDao().exercisePreferences().any{it.exerciseId=="dumbbell_lateral_raise"})
+        }
+    }
+
+    private fun selectionFailureRestoresStateAndRetries()=withRuntime { r,db ->
+        worker(r){
+            db.evidenceDao().deleteWorkoutFlowState("active")
+            RoomWorkoutProductRepository(db.evidenceDao()).setActiveSession(null)
+        }
+        val before=worker(r){db.evidenceDao().exercisePreferences()}
+        val c=onMain { WorkoutController(r) }
+        worker(r){};worker(r){}
+        worker(r){db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_review_selection BEFORE INSERT ON exercise_preferences " +
+                "BEGIN SELECT RAISE(ABORT, 'review injected selection failure'); END")}
+        try {
+            onMain { c.selectExercise("dumbbell_lateral_raise") }
+            worker(r){};worker(r){}
+            val state=c.uiState.value as WorkoutUiState.ExerciseSelection
+            check(state.errorMessage!=null) { "Failed selection gave no retry feedback" }
+            worker(r){
+                check(field(r,"currentAnalyzer")==null)
+                check((field(r,"workoutIdentity") as WorkoutSessionIdentity).sessionId==null)
+                check(RoomWorkoutProductRepository(db.evidenceDao()).loadSelectionSnapshot().activeSessionId==null)
+                check(db.evidenceDao().exercisePreferences()==before) { "Failed selection changed durable preferences" }
+            }
+        } finally { worker(r){db.openHelper.writableDatabase.execSQL("DROP TRIGGER IF EXISTS fail_review_selection")} }
+        onMain { c.selectExercise("dumbbell_lateral_raise") }
+        worker(r){};worker(r){}
+        check(c.uiState.value is WorkoutUiState.CameraSetup)
+        worker(r){
+            check(field(r,"currentAnalyzer")!=null)
+            check(RoomWorkoutProductRepository(db.evidenceDao()).loadSelectionSnapshot().activeSessionId!=null)
         }
     }
 

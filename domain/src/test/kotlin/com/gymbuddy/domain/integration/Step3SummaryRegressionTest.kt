@@ -27,6 +27,14 @@ class Step3SummaryRegressionTest {
             responses=listOf(CueResponse("cue","r3",CueResponseState.IMPROVED)))
         check(engine.summarize(e).focusRuleId==null) { "Resolved correction was repeated as next-set focus" }
     }
+    @Test fun orphanObservationsCannotBecomeAConfidentFocus() {
+        val e=evidence(listOf(obs("o1","r1"),obs("o2","r2"))).copy(reps=emptyList())
+        check(engine.summarize(e).focusRuleId==null)
+    }
+    @Test fun unfinishedSetCannotBecomeAConfidentFocus() {
+        val e=evidence(listOf(obs("o1","r1"),obs("o2","r2"))).copy(summary=null)
+        check(engine.summarize(e).focusRuleId==null)
+    }
     @Test fun undeliveredAudioDoesNotBecomeAHeardCorrection() {
         val e=evidence(emptyList()).copy(
             cues=listOf(CueEvent("cue","bilateral_asymmetry","r2",250L,"MINOR")),

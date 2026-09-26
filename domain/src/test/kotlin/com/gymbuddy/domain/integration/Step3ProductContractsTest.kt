@@ -102,13 +102,15 @@ class Step3ProductContractsTest {
         val evidence=PersistedSetEvidence(
             set=SetRecord("set","exec",1,0L),
             analysisProvenance=provenance(),
-            reps=emptyList(),
+            // Recurrence is based on three distinct, durably completed reps.
+            reps=(1..3).map{n->RepEvidence("r$n",n,"cycle",MovementPrimitive.RAISE,
+                n*100L,n*100L+50,RepClassification.NORMAL,emptyMap(),emptyMap(),provenance())},
             observations=listOf(
                 observation("o1","r1","bilateral_asymmetry",FormObservationState.DEVIATION),
                 observation("o2","r2","bilateral_asymmetry",FormObservationState.DEVIATION),
                 observation("o3","r3","press_elbow_path_flare",FormObservationState.DEVIATION),
             ),
-            cues=emptyList(),responses=emptyList(),tracking=null,summary=null,
+            cues=emptyList(),responses=emptyList(),tracking=null,summary=SetSummary("set",400,3,0,0,1000),
         )
         val summary=EvidenceSummaryEngine{rule->"text:$rule"}.summarize(evidence)
         assertEquals("bilateral_asymmetry",summary.focusRuleId)

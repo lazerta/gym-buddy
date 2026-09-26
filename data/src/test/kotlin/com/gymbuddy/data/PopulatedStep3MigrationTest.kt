@@ -59,9 +59,9 @@ class PopulatedStep3MigrationTest {
                         db.execSQL("INSERT INTO set_summaries VALUES ('set',950,1,0,0,2000)")
                         db.execSQL("INSERT INTO workout_flow_states VALUES ('active','set','Legacy focus',30.0,'lb',2000,'REST')")
                         db.execSQL("INSERT INTO personal_calibration_profiles VALUES ('active',?,?,?,?)",
-                            arrayOf(profile.calibrationProfileId,profile.profileVersion,profile.semanticHash,payload))
+                            arrayOf<Any>(profile.calibrationProfileId,profile.profileVersion,profile.semanticHash,payload))
                         db.execSQL("INSERT INTO personal_calibration_profile_history VALUES (?,?,?,?)",
-                            arrayOf(profile.calibrationProfileId,profile.profileVersion,profile.semanticHash,payload))
+                            arrayOf<Any>(profile.calibrationProfileId,profile.profileVersion,profile.semanticHash,payload))
                     }
                     override fun onUpgrade(db:SupportSQLiteDatabase,oldVersion:Int,newVersion:Int)=error("historical fixture must not upgrade itself")
                 }).build())
