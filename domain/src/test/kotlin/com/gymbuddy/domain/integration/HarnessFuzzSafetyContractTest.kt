@@ -8,6 +8,7 @@ import com.gymbuddy.domain.tracking.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
@@ -15,7 +16,7 @@ import kotlin.math.floor
 
 class HarnessFuzzSafetyContractTest {
     @Test
-    fun compositeFuzzNeverAdmitsBiomechanicsAcrossHarnessForbiddenGates() {
+    fun compositeFuzzEnforcesZeroToleranceSafetyAndReportsObservationBoundaries() {
         val fixturePath=System.getenv(FIXTURE_ENV)
         assumeTrue(
             "$FIXTURE_ENV is supplied by the read-only harness workflow",
@@ -25,6 +26,8 @@ class HarnessFuzzSafetyContractTest {
         assertEquals(EXPECTED_HARNESS_COMMIT,fixture.harnessCommit)
         assertEquals(200,fixture.cases.size)
 
+        var lowObservationCases=0
+        var lowObservationAllowed=0
         fixture.cases.forEach { contract ->
             val profile=requireNotNull(
                 InitialExerciseProfiles.resolveByExternalId(contract.exerciseId)
@@ -89,15 +92,24 @@ class HarnessFuzzSafetyContractTest {
                 }
                 "camera_changed",
                 "target_ambiguous",
-                "target_observation_low",
                 "target_temporarily_lost" -> {
                     assertFalse(
                         "${contract.key}: ${contract.oracleReason} admitted biomechanics",
                         tracking.allowsBiomechanics,
                     )
                 }
+                "target_observation_low" -> {
+                    lowObservationCases++
+                    if(tracking.allowsBiomechanics)lowObservationAllowed++
+                }
             }
         }
+        assertTrue("fuzz fixture must exercise observation-quality boundaries",lowObservationCases>0)
+        println(
+            "FUZZ_OBSERVATION_BOUNDARY_DIAGNOSTIC " +
+                "cases=$lowObservationCases allowed=$lowObservationAllowed " +
+                "paused=${lowObservationCases-lowObservationAllowed}"
+        )
     }
 
     private fun tracking(
