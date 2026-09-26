@@ -16,7 +16,32 @@ enum class LensFacing { FRONT,BACK }
 enum class CameraGuidanceAction { MOVE_LEFT,MOVE_RIGHT,MOVE_CLOSER,MOVE_FARTHER,RAISE_CAMERA,LOWER_CAMERA,ADJUST_ANGLE,CAMERA_READY,CANNOT_ASSESS }
 data class NumericRange(val min:Double,val max:Double){init{require(min.isFinite()&&max.isFinite());require(min<=max)};operator fun contains(value:Double)=value in min..max}
 data class LandmarkRequirement(val landmarkId:String,val minVisibility:Double,val minPresence:Double?=null){init{requireIdentifier(landmarkId,"landmarkId");requireUnitInterval(minVisibility,"minVisibility");minPresence?.let{requireUnitInterval(it,"minPresence")}}}
-data class CameraProfile(override val profileId:String,override val profileVersion:Int,override val semanticHash:String,val preferredViewClass:ViewClass,val allowedViewClasses:Set<ViewClass>,val allowedLensFacing:Set<LensFacing>,val requiredLandmarks:Set<LandmarkRequirement>,val frameFillRange:NumericRange,val minVisibleRequiredFraction:Double,val maxTrackingGapMs:Long,val guidanceActions:Set<CameraGuidanceAction>):VersionedProfile{init{requireIdentifier(profileId,"profileId");requireVersion(profileVersion);requireSemanticHash(semanticHash);require(allowedViewClasses.isNotEmpty());require(preferredViewClass in allowedViewClasses);require(allowedLensFacing.isNotEmpty());require(requiredLandmarks.isNotEmpty());require(requiredLandmarks.map{it.landmarkId}.distinct().size==requiredLandmarks.size);require(frameFillRange.min>=0.0&&frameFillRange.max<=1.0);requireUnitInterval(minVisibleRequiredFraction,"minVisibleRequiredFraction");require(maxTrackingGapMs>=0);require(CameraGuidanceAction.CAMERA_READY in guidanceActions);require(CameraGuidanceAction.CANNOT_ASSESS in guidanceActions)}}
+data class CameraProfile(
+    override val profileId:String,
+    override val profileVersion:Int,
+    override val semanticHash:String,
+    val preferredViewClass:ViewClass,
+    val allowedViewClasses:Set<ViewClass>,
+    val allowedLensFacing:Set<LensFacing>,
+    val requiredLandmarks:Set<LandmarkRequirement>,
+    val frameFillRange:NumericRange,
+    val minVisibleRequiredFraction:Double,
+    val maxTrackingGapMs:Long,
+    val guidanceActions:Set<CameraGuidanceAction>,
+    val subjectCenterXRange:NumericRange=NumericRange(.32,.68),
+    val subjectCenterYRange:NumericRange=NumericRange(.32,.68),
+):VersionedProfile{
+    init{
+        requireIdentifier(profileId,"profileId");requireVersion(profileVersion);requireSemanticHash(semanticHash)
+        require(allowedViewClasses.isNotEmpty());require(preferredViewClass in allowedViewClasses);require(allowedLensFacing.isNotEmpty())
+        require(requiredLandmarks.isNotEmpty());require(requiredLandmarks.map{it.landmarkId}.distinct().size==requiredLandmarks.size)
+        require(frameFillRange.min>=0.0&&frameFillRange.max<=1.0)
+        require(subjectCenterXRange.min>=0.0&&subjectCenterXRange.max<=1.0)
+        require(subjectCenterYRange.min>=0.0&&subjectCenterYRange.max<=1.0)
+        requireUnitInterval(minVisibleRequiredFraction,"minVisibleRequiredFraction");require(maxTrackingGapMs>=0)
+        require(CameraGuidanceAction.CAMERA_READY in guidanceActions);require(CameraGuidanceAction.CANNOT_ASSESS in guidanceActions)
+    }
+}
 
 enum class SignalKind { JOINT_ANGLE,NORMALIZED_POINT_DISTANCE,BODY_LOCAL_DISPLACEMENT,VELOCITY,DIRECTION,REVERSAL,PHASE_DWELL,ROM_PROXY,BILATERAL_TIMING,TRAJECTORY_DEVIATION,HOLD_DURATION,CONFIDENCE }
 enum class SignalUnit { UNITLESS,NORMALIZED,DEGREES,RADIANS,METERS,METERS_PER_SECOND,MILLISECONDS,SECONDS }
