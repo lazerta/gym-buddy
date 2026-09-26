@@ -15,9 +15,16 @@ object InitialExerciseProfiles {
     private val dumbbellGeneric by lazy { EquipmentProfile("dumbbell-generic",2,"dumbbell-generic-v2",EquipmentType.DUMBBELL,setOf(PRESS_ID,RAISE_ID)) }
     private val smithGeneric by lazy { EquipmentProfile("smith-generic",1,"smith-generic-v1",EquipmentType.SMITH_MACHINE,setOf(SQUAT_ID)) }
 
-    private fun camera(id:String,version:Int,preferred:ViewClass,allowed:Set<ViewClass>,required:Set<String>)=CameraProfile(
+    private fun camera(
+        id:String,
+        version:Int,
+        preferred:ViewClass,
+        allowed:Set<ViewClass>,
+        required:Set<String>,
+        frameFillRange:NumericRange,
+    )=CameraProfile(
         "$id-camera",version,"$id-camera-v$version",preferred,allowed,setOf(LensFacing.BACK),
-        required.map{LandmarkRequirement(it,.55,.50)}.toSet(),NumericRange(.20,.95),.80,350,
+        required.map{LandmarkRequirement(it,.55,.50)}.toSet(),frameFillRange,.80,350,
         CameraGuidanceAction.entries.toSet(),NumericRange(.32,.68),NumericRange(.32,.68)
     )
     private fun cue(id:String)=CuePolicy("$id-cue",1,"$id-cue-v1",3,2,15_000,2)
@@ -145,7 +152,7 @@ object InitialExerciseProfiles {
         val p=profile(
             PRESS_ID,
             EquipmentType.DUMBBELL,
-            camera(PRESS_ID,3,ViewClass.SIDE_OBLIQUE,setOf(ViewClass.SIDE_OBLIQUE,ViewClass.SIDE),req),
+            camera(PRESS_ID,3,ViewClass.SIDE_OBLIQUE,setOf(ViewClass.SIDE_OBLIQUE,ViewClass.SIDE),req,NumericRange(.42,.86)),
             inclinePressSignals(),
             primitive(PRESS_ID,MovementPrimitive.PRESS),
             metricProfile=inclinePressMetrics(),
@@ -160,7 +167,7 @@ object InitialExerciseProfiles {
         val p=profile(
             SQUAT_ID,
             EquipmentType.SMITH_MACHINE,
-            camera(SQUAT_ID,3,ViewClass.SIDE,setOf(ViewClass.SIDE,ViewClass.SIDE_OBLIQUE),req),
+            camera(SQUAT_ID,3,ViewClass.SIDE,setOf(ViewClass.SIDE,ViewClass.SIDE_OBLIQUE),req,NumericRange(.55,.94)),
             sig,
             primitive(SQUAT_ID,MovementPrimitive.SQUAT),
             metricProfile=smithSquatMetrics(),
@@ -173,7 +180,7 @@ object InitialExerciseProfiles {
         val p=profile(
             RAISE_ID,
             EquipmentType.DUMBBELL,
-            camera(RAISE_ID,3,ViewClass.FRONT,setOf(ViewClass.FRONT,ViewClass.FRONT_OBLIQUE),req),
+            camera(RAISE_ID,3,ViewClass.FRONT,setOf(ViewClass.FRONT,ViewClass.FRONT_OBLIQUE),req,NumericRange(.55,.93)),
             lateralRaiseSignals(),
             primitive(RAISE_ID,MovementPrimitive.RAISE),
             metricProfile=lateralRaiseMetrics(),
