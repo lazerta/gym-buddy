@@ -100,7 +100,14 @@ class HarnessFuzzSafetyContractTest {
                 }
                 "target_observation_low" -> {
                     lowObservationCases++
-                    if(tracking.allowsBiomechanics)lowObservationAllowed++
+                    if(contract.oraclePause) {
+                        assertFalse(
+                            "${contract.key}: oracle-required observation pause admitted biomechanics",
+                            tracking.allowsBiomechanics,
+                        )
+                    } else if(tracking.allowsBiomechanics) {
+                        lowObservationAllowed++
+                    }
                 }
             }
         }
@@ -227,6 +234,9 @@ class HarnessFuzzSafetyContractTest {
                     cameraMotionScore=p[8].toDouble(),
                     trackingGapMs=p[9].toLong(),
                     detectedPeople=p[10].toInt(),
+                    oracleReady=p[11].toBooleanStrict(),
+                    oraclePause=p[12].toBooleanStrict(),
+                    oracleResetOnce=p[13].toBooleanStrict(),
                     oracleReason=p[14],
                 )
             }
@@ -251,6 +261,9 @@ class HarnessFuzzSafetyContractTest {
         val cameraMotionScore:Double,
         val trackingGapMs:Long,
         val detectedPeople:Int,
+        val oracleReady:Boolean,
+        val oraclePause:Boolean,
+        val oracleResetOnce:Boolean,
         val oracleReason:String,
     )
 
