@@ -60,11 +60,12 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
         var runtime2:DefaultWorkoutRuntime?=null
         var controller2:WorkoutController?=null
         try{
-            runtime1=DefaultWorkoutRuntime(applicationContext,wallClock={epoch.getAndAdd(1_000L)})
-            val db1=field(runtime1,"database") as GymBuddyDatabase
-            controller1=onMain{WorkoutController(runtime1,clock=clock)}
-            drain(runtime1,6)
-            val c1=requireNotNull(controller1)
+            val r1=DefaultWorkoutRuntime(applicationContext,wallClock={epoch.getAndAdd(1_000L)})
+            runtime1=r1
+            val db1=field(r1,"database") as GymBuddyDatabase
+            val c1=onMain{WorkoutController(r1,clock=clock)}
+            controller1=c1
+            drain(r1,6)
 
             onMain{
                 c1.toggleFavorite(ACTUAL)
@@ -72,8 +73,8 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
                 c1.updateEquipmentLabel(EQUIPMENT_LABEL)
                 c1.saveEquipmentContext()
             }
-            drain(runtime1,6)
-            val product1=worker(runtime1){RoomWorkoutProductRepository(db1.evidenceDao()).loadSelectionSnapshot()}
+            drain(r1,6)
+            val product1=worker(r1){RoomWorkoutProductRepository(db1.evidenceDao()).loadSelectionSnapshot()}
             val equipmentId=requireNotNull(
                 product1.preferences.firstOrNull{it.exerciseId==ACTUAL}?.equipmentContextId
             )
@@ -88,16 +89,16 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(search.substitutionForExerciseId==PLANNED)
             check(search.searchResults.any{it.exerciseId==ACTUAL})
             onMain{c1.selectOtherExercise(ACTUAL)}
-            drain(runtime1,6)
+            drain(r1,6)
             check(c1.uiState.value is WorkoutUiState.CameraSetup)
 
-            val driver1=initializeDriver(runtime1,c1)
-            worker(runtime1){driver1.ready();driver1.cycle()}
+            val driver1=initializeDriver(r1,c1)
+            worker(r1){driver1.ready();driver1.cycle()}
             val active1=c1.uiState.value as WorkoutUiState.ActiveSet
             check(active1.repCount==1)
             val set1=driver1.setId
             onMain{c1.endSet()}
-            drain(runtime1,6)
+            drain(r1,6)
             val rest1=c1.uiState.value as WorkoutUiState.Rest
             check(rest1.previousReps==1)
 
@@ -106,7 +107,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
                 c1.updateNextLoadUnit("lb")
                 c1.updateNextLoadBasis(LoadBasis.PER_SIDE)
             }
-            drain(runtime1,5)
+            drain(r1,5)
             val edited=c1.uiState.value as WorkoutUiState.Rest
             check(edited.plannedNextLoadText=="25")
             check(edited.plannedNextLoadUnit=="lb")
@@ -115,14 +116,15 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             // Process death/recreation at REST. The persisted plan and substitution
             // provenance must be enough to continue without any in-memory object.
             onMain{c1.close()}
-            check((runtime1.analysisExecutor as ExecutorService).awaitTermination(15,TimeUnit.SECONDS))
+            check((r1.analysisExecutor as ExecutorService).awaitTermination(15,TimeUnit.SECONDS))
             runtime1=null;controller1=null
 
-            runtime2=DefaultWorkoutRuntime(applicationContext,wallClock={epoch.getAndAdd(1_000L)})
-            val db2=field(runtime2,"database") as GymBuddyDatabase
-            controller2=onMain{WorkoutController(runtime2,clock=clock)}
-            drain(runtime2,8)
-            val c2=requireNotNull(controller2)
+            val r2=DefaultWorkoutRuntime(applicationContext,wallClock={epoch.getAndAdd(1_000L)})
+            runtime2=r2
+            val db2=field(r2,"database") as GymBuddyDatabase
+            val c2=onMain{WorkoutController(r2,clock=clock)}
+            controller2=c2
+            drain(r2,8)
             val recovered=c2.uiState.value as WorkoutUiState.Rest
             check(recovered.completedSetNumber==1)
             check(recovered.previousReps==1)
@@ -131,10 +133,10 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(recovered.plannedNextLoadBasis==LoadBasis.PER_SIDE)
 
             onMain{c2.nextSet()}
-            drain(runtime2,6)
+            drain(r2,6)
             check(c2.uiState.value is WorkoutUiState.CameraSetup)
-            val driver2=initializeDriver(runtime2,c2)
-            worker(runtime2){
+            val driver2=initializeDriver(r2,c2)
+            worker(r2){
                 driver2.ready()
                 driver2.step(55.0)
                 val interrupted=driver2.step(90.0,.95)
@@ -149,10 +151,10 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             val set2=driver2.setId
 
             onMain{c2.endSet()}
-            drain(runtime2,7)
+            drain(r2,7)
             val rest2=c2.uiState.value as WorkoutUiState.Rest
             check(rest2.completedSetNumber==2&&rest2.previousReps==1)
-            val evidence2=worker(runtime2){requireNotNull(RoomEvidenceRepository(db2.evidenceDao()).loadSet(set2))}
+            val evidence2=worker(r2){requireNotNull(RoomEvidenceRepository(db2.evidenceDao()).loadSet(set2))}
             check(evidence2.invalidAttempts.isNotEmpty()){"Camera interruption was not durably represented"}
             check(evidence2.reps.size==1)
 
@@ -164,13 +166,13 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(persistedSet2.plannedLoad?.source==LoadSource.PLANNED)
 
             onMain{c2.finishExercise()}
-            drain(runtime2,8)
+            drain(r2,8)
             val summary0=c2.uiState.value as WorkoutUiState.Summary
             check(summary0.completedSets.size==2)
 
             // GPT history write failure is part of the whole workflow, not an
             // isolated repository test: Summary must remain truthful and retryable.
-            worker(runtime2){
+            worker(r2){
                 db2.openHelper.writableDatabase.execSQL(
                     "CREATE TRIGGER fail_step4_gpt BEFORE INSERT ON gpt_analyses "+
                         "BEGIN SELECT RAISE(ABORT, 'step4 gpt failure'); END")
@@ -183,9 +185,9 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
                 }
             }
             check(failed.await(10,TimeUnit.SECONDS)&&failedOk.get()==false)
-            drain(runtime2,4)
+            drain(r2,4)
             check((c2.uiState.value as WorkoutUiState.Summary).savedAnalyses.isEmpty())
-            worker(runtime2){db2.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_step4_gpt")}
+            worker(r2){db2.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_step4_gpt")}
 
             val saved=CountDownLatch(1)
             val savedOk=AtomicReference<Boolean?>(null)
@@ -195,7 +197,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
                 }
             }
             check(saved.await(10,TimeUnit.SECONDS)&&savedOk.get()==true)
-            drain(runtime2,5)
+            drain(r2,5)
             check((c2.uiState.value as WorkoutUiState.Summary).savedAnalyses.size==1)
 
             val exportLatch=CountDownLatch(1)
@@ -213,7 +215,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(json.contains("\"invalid_attempts\":[{"))
 
             onMain{c2.returnToSelection()}
-            drain(runtime2,7)
+            drain(r2,7)
             val selection=c2.uiState.value as WorkoutUiState.ExerciseSelection
             val rowActual=selection.exercises.first{it.exerciseId==ACTUAL}
             check(rowActual.completedSets==2)
@@ -223,10 +225,10 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
             check(selection.recentExercises.any{it.exerciseId==ACTUAL})
 
             onMain{c2.startNewWorkout()}
-            drain(runtime2,7)
+            drain(r2,7)
             val fresh=c2.uiState.value as WorkoutUiState.ExerciseSelection
             check(fresh.exercises.first{it.exerciseId==ACTUAL}.completedSets==0)
-            worker(runtime2){
+            worker(r2){
                 check(db2.evidenceDao().set(set1)!=null)
                 check(db2.evidenceDao().set(set2)!=null)
                 check(RoomWorkoutProductRepository(db2.evidenceDao()).loadSelectionSnapshot().activeSessionId==null)
