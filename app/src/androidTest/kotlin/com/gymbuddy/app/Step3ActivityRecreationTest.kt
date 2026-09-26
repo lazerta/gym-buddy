@@ -27,7 +27,7 @@ class Step3ActivityRecreationTest {
         val anchor=RestClockAnchor(clock.nowElapsedMs(),clock.bootId())
         val plan=LoadSnapshot(25.0,"lb",LoadBasis.PER_SIDE,LoadSource.PLANNED,
             ResistanceKind.EXTERNAL_LOAD,LoadMeasurementMode.ADDED_LOAD)
-        GymBuddyDatabaseFactory.create(context).use{db->
+        GymBuddyDatabaseFactory.create(context).withDatabase{db->
             val b=InitialExerciseProfiles.dumbbellLateralRaise
             val dao=db.evidenceDao();val repo=RoomEvidenceRepository(dao)
             val equipment=EquipmentContextRecord("recreation-equipment",b.equipment!!.profileId,"Bench A",1000)
@@ -63,9 +63,10 @@ class Step3ActivityRecreationTest {
             assertEquals(LoadBasis.PER_SIDE,restored.plannedNextLoadBasis)
             assertEquals(ResistanceKind.EXTERNAL_LOAD,restored.plannedNextResistanceKind)
             assertEquals(LoadMeasurementMode.ADDED_LOAD,restored.plannedNextMeasurementMode)
-            assertFalse(restored.timerAnchor!!.estimated)
-            assertTrue(restored.timerAnchor.elapsedMs(clock.nowElapsedMs())>=before.timerAnchor!!.elapsedMs(anchor.elapsedRealtimeMs))
-            GymBuddyDatabaseFactory.create(context).use{db->
+            val restoredTimer=requireNotNull(restored.timerAnchor)
+            assertFalse(restoredTimer.estimated)
+            assertTrue(restoredTimer.elapsedMs(clock.nowElapsedMs())>=before.timerAnchor!!.elapsedMs(anchor.elapsedRealtimeMs))
+            GymBuddyDatabaseFactory.create(context).withDatabase{db->
                 val saved=RoomWorkoutFlowRepository(db.evidenceDao()).loadRestCheckpoint()!!
                 assertEquals(anchor,saved.clockAnchor)
                 assertEquals("recreation-equipment",saved.execution.equipmentContextId)
@@ -78,6 +79,9 @@ class Step3ActivityRecreationTest {
             context.deleteDatabase("gym-buddy.db")
         }
     }
+    private fun <T> GymBuddyDatabase.withDatabase(body:(GymBuddyDatabase)->T):T =
+        try{body(this)}finally{close()}
+
     private fun controller(scenario:ActivityScenario<MainActivity>):WorkoutController{
         val reference=AtomicReference<WorkoutController>()
         scenario.onActivity{activity->reference.set(MainActivity::class.java.getDeclaredField("controller").apply{

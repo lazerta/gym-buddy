@@ -23,12 +23,12 @@ class RoomStep3RepairTest {
             val actual=LoadSnapshot(20.0,"lb",LoadBasis.PER_SIDE,LoadSource.USER_ENTERED,
                 ResistanceKind.EXTERNAL_LOAD,LoadMeasurementMode.ADDED_LOAD)
             val plan=actual.copy(value=25.0,source=LoadSource.PLANNED,measurementMode=LoadMeasurementMode.IMPLEMENT_MASS)
-            open().use{db->
+            open().withDatabase{db->
                 fixture(db,actual,plan)
                 val flow=RoomWorkoutFlowRepository(db.evidenceDao())
                 flow.saveRestCheckpoint(RestCheckpointDraft("set","focus",plan,2000,RestClockAnchor(1200,"boot-1")))
             }
-            open().use{db->
+            open().withDatabase{db->
                 val repo=RoomEvidenceRepository(db.evidenceDao())
                 val evidence=repo.loadSet("set")!!
                 assertEquals(actual,evidence.set.actualLoad);assertEquals(plan,evidence.set.plannedLoad)
@@ -48,7 +48,7 @@ class RoomStep3RepairTest {
             val old=LoadSnapshot(20.0,"kg",LoadBasis.TOTAL,LoadSource.PLANNED)
             val next=old.copy(value=25.0,resistanceKind=ResistanceKind.EXTERNAL_LOAD,
                 measurementMode=LoadMeasurementMode.IMPLEMENT_MASS)
-            open().use{db->
+            open().withDatabase{db->
                 fixture(db,old,null)
                 val flow=RoomWorkoutFlowRepository(db.evidenceDao())
                 flow.saveRestCheckpoint(RestCheckpointDraft("set","focus",old,2000,RestClockAnchor(1000,"1")))
@@ -58,7 +58,7 @@ class RoomStep3RepairTest {
                 db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_rest")
                 flow.saveRestCheckpoint(RestCheckpointDraft("set","focus",next,2000,RestClockAnchor(1000,"1")))
             }
-            open().use{db->
+            open().withDatabase{db->
                 val saved=RoomWorkoutFlowRepository(db.evidenceDao()).loadRestCheckpoint()!!
                 assertEquals(next,saved.plannedNextLoad);assertEquals(RestClockAnchor(1000,"1"),saved.clockAnchor)
             }
@@ -67,7 +67,7 @@ class RoomStep3RepairTest {
     @Test fun allRecurringAndDeliveredResponseEvidenceReconstructsAfterReopen(){
         withReopen{open->
             var live:SetCoachingSummary?=null
-            open().use{db->
+            open().withDatabase{db->
                 fixture(db,null,null,finish=false)
                 val repo=RoomEvidenceRepository(db.evidenceDao())
                 (1..3).forEach{n->
@@ -87,7 +87,7 @@ class RoomStep3RepairTest {
                 live=EvidenceSummaryEngine().summarize(repo.loadSet("set")!!)
                 RoomWorkoutFlowRepository(db.evidenceDao()).saveRestCheckpoint(RestCheckpointDraft("set","stale focus",null,2000))
             }
-            open().use{db->
+            open().withDatabase{db->
                 val restored=RoomWorkoutFlowRepository(db.evidenceDao(),EvidenceSummaryEngine()).loadRestCheckpoint()!!
                 val summary=restored.completedSets.single().coachingSummary!!
                 assertEquals(live,summary)
@@ -97,6 +97,9 @@ class RoomStep3RepairTest {
             }
         }
     }
+    private fun <T> GymBuddyDatabase.withDatabase(body:(GymBuddyDatabase)->T):T =
+        try{body(this)}finally{close()}
+
     private fun config():AnalysisConfig{val b=InitialExerciseProfiles.dumbbellLateralRaise
         return AnalysisConfigResolver.resolve(b.definition,b.profile,b.equipment)}
     private fun fixture(db:GymBuddyDatabase,actual:LoadSnapshot?,planned:LoadSnapshot?,finish:Boolean=true){
