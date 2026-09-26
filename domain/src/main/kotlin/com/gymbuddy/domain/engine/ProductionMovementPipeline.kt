@@ -171,12 +171,17 @@ class ProductionMovementPipeline(
                 invalidated == SetLifecycleState.CAMERA_GUIDANCE
             ) {
                 cameraGuidanceEngine.reset()
+                val recoveryGuidance=when(tracking.reason){
+                    TrackingQualityReason.WRONG_VIEW->CameraGuidanceAction.ADJUST_ANGLE
+                    TrackingQualityReason.CAMERA_DISTURBANCE->CameraGuidanceAction.CANNOT_ASSESS
+                    else->guidance
+                }
                 return result(
                     frame.timestampUs,
                     lock,
                     tracking,
                     interruptOnce(frame.timestampUs),
-                    guidance,
+                    recoveryGuidance,
                     effectiveContext.observedViewClass,
                 )
             }
