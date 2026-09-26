@@ -1,0 +1,36 @@
+name: step3-source-snapshot
+on:
+  push:
+    branches: [tools/step3-source-snapshot-20260926]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e17f5f9c5a711d6980b4a9f8917c6a4dad3c9c3a
+          path: production
+      - uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
+          path: harness
+      - name: Export tracked sources only
+        run: |
+          set -euo pipefail
+          mkdir -p snapshot
+          git -C production archive HEAD | gzip -n > snapshot/production.tar.gz
+          git -C production rev-parse HEAD > snapshot/production.sha
+          git -C production ls-tree -r HEAD > snapshot/production-tree.txt
+          git -C harness archive HEAD | gzip -n > snapshot/harness.tar.gz
+          git -C harness rev-parse HEAD > snapshot/harness.sha
+          curl -fsSL https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar -o snapshot/junit-4.13.2.jar
+          curl -fsSL https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar -o snapshot/hamcrest-core-1.3.jar
+          (cd snapshot && sha256sum * > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step3-pinned-offline-sources
+          path: snapshot/
+          retention-days: 2
