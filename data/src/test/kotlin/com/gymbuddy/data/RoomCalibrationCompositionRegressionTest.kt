@@ -167,7 +167,7 @@ class RoomCalibrationCompositionRegressionTest {
             activeUnknown:Int=0,
             interruptionEpisodes:Int=0,
             cameraDisturbanceEpisodes:Int=0,
-            frameFill:Double=.50,
+            frameFill:Double=.65,
             promote:Boolean=true,
             interrupted:Boolean=false,
             sessionStartOverride:Long?=null,
