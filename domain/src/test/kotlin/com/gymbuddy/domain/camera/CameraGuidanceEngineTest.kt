@@ -2,6 +2,7 @@ package com.gymbuddy.domain.camera
 
 import com.gymbuddy.domain.pose.*
 import com.gymbuddy.domain.profile.*
+import com.gymbuddy.domain.profiles.InitialExerciseProfiles
 import com.gymbuddy.domain.tracking.*
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -20,6 +21,51 @@ class CameraGuidanceEngineTest {
         val engine = CameraGuidanceEngine(1)
         assertEquals(CameraGuidanceAction.MOVE_CLOSER, engine.evaluate(frame(.1), locked, profile, side))
         assertEquals(CameraGuidanceAction.MOVE_FARTHER, engine.evaluate(frame(.9), locked, profile, side))
+    }
+
+    @Test fun horizontalMisframingProducesDirectionalPhoneGuidance() {
+        val engine = CameraGuidanceEngine(1)
+        assertEquals(
+            CameraGuidanceAction.MOVE_LEFT,
+            engine.evaluate(frame(.4, centerX = .28), locked, profile, side),
+        )
+        assertEquals(
+            CameraGuidanceAction.MOVE_RIGHT,
+            engine.evaluate(frame(.4, centerX = .72), locked, profile, side),
+        )
+    }
+
+    @Test fun verticalMisframingProducesDirectionalPhoneGuidance() {
+        val engine = CameraGuidanceEngine(1)
+        assertEquals(
+            CameraGuidanceAction.RAISE_CAMERA,
+            engine.evaluate(frame(.4, centerY = .28), locked, profile, side),
+        )
+        assertEquals(
+            CameraGuidanceAction.LOWER_CAMERA,
+            engine.evaluate(frame(.4, centerY = .72), locked, profile, side),
+        )
+    }
+
+    @Test fun shippedProfilesExposeCanonicalDirectionalGuidanceActions() {
+        val required = setOf(
+            CameraGuidanceAction.MOVE_LEFT,
+            CameraGuidanceAction.MOVE_RIGHT,
+            CameraGuidanceAction.MOVE_CLOSER,
+            CameraGuidanceAction.MOVE_FARTHER,
+            CameraGuidanceAction.RAISE_CAMERA,
+            CameraGuidanceAction.LOWER_CAMERA,
+            CameraGuidanceAction.ADJUST_ANGLE,
+            CameraGuidanceAction.CAMERA_READY,
+            CameraGuidanceAction.CANNOT_ASSESS,
+        )
+        InitialExerciseProfiles.all.forEach { bundle ->
+            assertEquals(
+                bundle.definition.exerciseId,
+                required,
+                bundle.profile.cameraProfile.guidanceActions,
+            )
+        }
     }
 
     @Test fun unsupportedGuidanceActionFallsBackToCannotAssess() {
@@ -97,9 +143,11 @@ class CameraGuidanceEngineTest {
         missing: PoseLandmarkId? = null,
         outOfFrame: PoseLandmarkId? = null,
         lowConfidence: Set<PoseLandmarkId> = emptySet(),
+        centerX: Double = .5,
+        centerY: Double = .5,
     ): PoseFrame = PoseFrame(
         1, 1_000, 1080, 1920, PoseFrameSource.VIDEO,
-        listOf(candidate(fill, candidateIndex, missing, outOfFrame, lowConfidence)),
+        listOf(candidate(fill, candidateIndex, missing, outOfFrame, lowConfidence, centerX, centerY)),
     )
 
     private fun candidate(
@@ -108,9 +156,11 @@ class CameraGuidanceEngineTest {
         missing: PoseLandmarkId? = null,
         outOfFrame: PoseLandmarkId? = null,
         lowConfidence: Set<PoseLandmarkId> = emptySet(),
+        centerX: Double = .5,
+        centerY: Double = .5,
     ): PoseSubjectCandidate {
-        val left = .5 - fill / 2; val right = .5 + fill / 2
-        val top = .5 - fill / 2; val bottom = .5 + fill / 2
+        val left = centerX - fill / 2; val right = centerX + fill / 2
+        val top = centerY - fill / 2; val bottom = centerY + fill / 2
         fun lm(id: PoseLandmarkId, x: Double, y: Double): PoseLandmarkObservation {
             val actualX = if (id == outOfFrame) 1.1 else x
             val confidence = if (id in lowConfidence) .2 else .9
