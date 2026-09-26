@@ -26,6 +26,7 @@ class Step3ReviewE2EActivity:ComponentActivity() {
         Thread({
             val tests=listOf<Pair<String,()->Unit>>(
                 "selection_leaves_ui_thread_free" to ::selectionLeavesUiThreadFree,
+                "queued_preparation_cannot_reopen_closed_runtime" to ::queuedPreparationCannotReopenClosedRuntime,
                 "selection_failure_rolls_back_and_retries" to ::selectionFailureRestoresStateAndRetries,
                 "reset_targets_selected_equipment" to ::resetTargetsSelectedEquipment,
                 "new_workout_failure_is_atomic" to ::newWorkoutFailureIsAtomic,
@@ -42,6 +43,27 @@ class Step3ReviewE2EActivity:ComponentActivity() {
             filesDir.resolve("step3-review-e2e.json").writeText(result.toString())
             runOnUiThread { label.text=if(passed)"STEP3_REVIEW_E2E_PASS" else result.toString() }
         },"step3-review").start()
+    }
+
+    private fun queuedPreparationCannotReopenClosedRuntime()=withRuntime { r,_ ->
+        worker(r){r.beginExercise("dumbbell_lateral_raise")}
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        val finished=CountDownLatch(1)
+        val result=AtomicReference<Boolean?>(null)
+        val callbacks=java.util.concurrent.atomic.AtomicInteger()
+        r.analysisExecutor.execute { entered.countDown();check(release.await(15,TimeUnit.SECONDS)) }
+        check(entered.await(5,TimeUnit.SECONDS))
+        try {
+            // A next-set command is admitted, then Activity destruction closes
+            // the runtime before that command can begin. It must not resurrect
+            // an analyzer referencing the disposed native inference resources.
+            r.prepareSet(1,null,null){success->result.set(success);callbacks.incrementAndGet();finished.countDown()}
+            r.close()
+        } finally { release.countDown() }
+        check(finished.await(10,TimeUnit.SECONDS)) { "Admitted preparation lost its terminal callback" }
+        check((r.analysisExecutor as ExecutorService).awaitTermination(10,TimeUnit.SECONDS))
+        check(result.get()==false && callbacks.get()==1) { "Closed runtime acknowledged a new analyzer" }
+        check(field(r,"currentAnalyzer")==null) { "Queued preparation reopened a closed runtime" }
     }
 
     private fun selectionLeavesUiThreadFree()=withRuntime { r,db ->
