@@ -85,7 +85,6 @@ print("ANDROID_PRODUCTION_MOVEMENT_E2E_PASS")
 PY
 
 bash tools/runtime_boundary_e2e.sh
-
 bash tools/postmerge_integration_e2e.sh
-
 bash tools/step3_review_e2e.sh
+bash tools/step4_whole_workflow_e2e.sh

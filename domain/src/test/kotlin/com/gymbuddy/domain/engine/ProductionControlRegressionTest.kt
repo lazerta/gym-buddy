@@ -5,6 +5,7 @@ import com.gymbuddy.domain.lifecycle.SetLifecycleState
 import com.gymbuddy.domain.pose.*
 import com.gymbuddy.domain.profile.*
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
+import com.gymbuddy.domain.tracking.TrackingObservationContext
 import com.gymbuddy.domain.tracking.TrackingQualityReason
 import org.junit.Assert.*
 import org.junit.Test
@@ -49,6 +50,29 @@ class ProductionControlRegressionTest {
         assertEquals(CameraGuidanceAction.CANNOT_ASSESS, ready1.cameraGuidance)
         assertEquals(CameraGuidanceAction.CAMERA_READY, ready2.cameraGuidance)
         assertNotEquals(SetLifecycleState.CAMERA_GUIDANCE, ready2.lifecycleState)
+    }
+
+    @Test fun cameraDisturbanceImmediatelyReturnsRepositionGuidance() {
+        val bundle=InitialExerciseProfiles.dumbbellLateralRaise
+        val pipeline=ProductionMovementPipeline(
+            AnalysisConfigResolver.resolve(bundle.definition,bundle.profile,bundle.equipment)
+        )
+        val context=TrackingObservationContext(
+            observedViewClass=ViewClass.FRONT,
+            cameraMotionScore=0.0,
+        )
+        val pose=candidate(front=true)
+        pipeline.process(PoseFrame(0,0,640,480,PoseFrameSource.CAMERA,listOf(pose)),context)
+        val ready=pipeline.process(PoseFrame(1,100_000,640,480,PoseFrameSource.CAMERA,listOf(pose)),context)
+        assertEquals(CameraGuidanceAction.CAMERA_READY,ready.cameraGuidance)
+
+        val disturbed=pipeline.process(
+            PoseFrame(2,200_000,640,480,PoseFrameSource.CAMERA,listOf(pose)),
+            context.copy(cameraMotionScore=.95),
+        )
+        assertEquals(TrackingQualityReason.CAMERA_DISTURBANCE,disturbed.tracking.reason)
+        assertEquals(SetLifecycleState.CAMERA_GUIDANCE,disturbed.lifecycleState)
+        assertEquals(CameraGuidanceAction.CANNOT_ASSESS,disturbed.cameraGuidance)
     }
 
     @Test fun viewEstimatorDoesNotGuessFrontWithoutFaceEvidence() {
