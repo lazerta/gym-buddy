@@ -79,6 +79,23 @@ class TrackingQualityGateTest {
         assertTrue(!result.allowsBiomechanics)
     }
 
+    @Test fun irrelevantLandmarksDoNotInvalidateProfileFraming() {
+        val camera=profile().copy(frameFillRange=NumericRange(.20,.50))
+        val base=person(0)
+        val withIrrelevantAnkle=base.copy(
+            normalizedLandmarks=base.normalizedLandmarks + (
+                PoseLandmarkId.LEFT_ANKLE to PoseLandmarkObservation(
+                    PoseLandmarkId.LEFT_ANKLE,p(.50,.95),.95,.95
+                )
+            )
+        )
+        val result=TrackingQualityGate().evaluate(
+            frame(0,withIrrelevantAnkle),locked(0),camera
+        )
+        assertEquals(TrackingQualityState.OBSERVABLE,result.state)
+        assertEquals(.40,requireNotNull(result.frameFill),1e-9)
+    }
+
     @Test fun continuityGapPausesOncePreviousSampleWasAccepted() {
         val gate = TrackingQualityGate()
         assertEquals(TrackingQualityState.OBSERVABLE, gate.evaluate(frame(0, person(0)), locked(0), profile()).state)
