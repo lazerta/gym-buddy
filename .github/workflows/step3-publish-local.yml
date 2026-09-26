@@ -1,0 +1,53 @@
+name: step3-publish-local
+on:
+  push:
+    branches: [tools/step3-source-snapshot-20260926]
+    paths: [.github/workflows/step3-publish-local.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: input
+      - uses: actions/checkout@v4
+        with:
+          ref: e17f5f9c5a711d6980b4a9f8917c6a4dad3c9c3a
+          path: production
+      - name: Verify exact local patch and publish new source branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64,hashlib,lzma,pathlib
+          root=pathlib.Path('input/.publisher')
+          encoded=''.join((root/f'step3-patch-{i}.b64').read_text().strip() for i in (1,2,3))
+          patch=lzma.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='4991c03958fb058536a2c8d2d8b6b01c8e22e1477417a5ad9b822886985044c4'
+          pathlib.Path('step3-repairs.patch').write_bytes(patch)
+          PY
+          cd production
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = e17f5f9c5a711d6980b4a9f8917c6a4dad3c9c3a
+          test -z "$(git ls-remote origin refs/heads/fix/step3-audit-repairs-20260926)"
+          git apply --check ../step3-repairs.patch
+          git apply --index ../step3-repairs.patch
+          test "$(git write-tree)" = cbe6652097816704cfbfd75d800545b5729f6a16
+          # Workflow edits are published separately through the authorized connector.
+          # The application branch contains no publisher or encoded transport files.
+          git restore --source=HEAD --staged --worktree .github/workflows/simulator-e2e.yml
+          test "$(git write-tree)" = 843460020ab5fd594ac3d56422f0df2e00d6e543
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c fix/step3-audit-repairs-20260926
+          git commit -m 'fix(step3): acknowledge saves, preserve evidence, and verify real lifecycle boundaries'
+          git push origin HEAD:refs/heads/fix/step3-audit-repairs-20260926
+          git rev-parse HEAD > ../published-head.txt
+          git rev-parse HEAD^{tree} > ../published-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step3-publication-identity
+          path: published-*.txt
+          retention-days: 7
