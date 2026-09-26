@@ -140,7 +140,7 @@ class Step4WholeWorkflowE2EActivity:ComponentActivity() {
                 driver2.ready()
                 driver2.step(55.0)
                 val interrupted=driver2.step(90.0,.95)
-                check(interrupted.movement.paused)
+                check(interrupted.pipeline.movement.paused)
                 val pausedState=c2.uiState.value as WorkoutUiState.ActiveSet
                 check(pausedState.cameraInstruction!=null)
                 repeat(6){driver2.step(20.0)}
