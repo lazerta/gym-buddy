@@ -138,7 +138,13 @@ class HarnessFuzzSafetyContractTest {
             gate.evaluate(
                 frame(
                     0L,
-                    listOf(candidate(profile,.45,1.0,.95,0)),
+                    listOf(candidate(
+                        profile,
+                        (profile.frameFillRange.min+profile.frameFillRange.max)/2.0,
+                        1.0,
+                        .95,
+                        0,
+                    )),
                 ),
                 lock.copy(candidateCount=1),
                 profile,
