@@ -161,6 +161,9 @@ class DefaultWorkoutRuntime(
 
     @Synchronized
     override fun beginSet(setOrdinal:Int,actualLoad:LoadSnapshot?,plannedLoad:LoadSnapshot?){
+        // close() uses this same monitor. A command queued before Activity
+        // destruction must not recreate an analyzer after disposal was admitted.
+        check(!worker.isShutdown){"Workout runtime is closed"}
         require(setOrdinal>0)
         check(currentAnalyzer==null){"A set analyzer is already active"}
         val selected=requireNotNull(bundle){"beginExercise or resumeExercise must be called before beginSet"}
