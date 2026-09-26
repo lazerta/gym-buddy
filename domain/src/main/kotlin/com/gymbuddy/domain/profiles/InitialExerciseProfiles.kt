@@ -150,7 +150,7 @@ object InitialExerciseProfiles {
             primitive(PRESS_ID,MovementPrimitive.PRESS),
             metricProfile=inclinePressMetrics(),
             formRuleSet=inclinePressRules(),
-            version=5,
+            version=4,
         )
         ExerciseBundle(ExerciseDefinition(PRESS_ID,1,"$PRESS_ID-def-v1","Incline Dumbbell Press",setOf("incline db press","incline dumbbell bench press"),MovementFamily.PRESS),p,dumbbellGeneric)
     }
@@ -164,7 +164,7 @@ object InitialExerciseProfiles {
             sig,
             primitive(SQUAT_ID,MovementPrimitive.SQUAT),
             metricProfile=smithSquatMetrics(),
-            version=5,
+            version=4,
         )
         ExerciseBundle(ExerciseDefinition(SQUAT_ID,1,"$SQUAT_ID-def-v1","Smith Machine Squat",setOf("smith squat","smith_squat"),MovementFamily.SQUAT),p,smithGeneric)
     }
@@ -178,7 +178,7 @@ object InitialExerciseProfiles {
             primitive(RAISE_ID,MovementPrimitive.RAISE),
             metricProfile=lateralRaiseMetrics(),
             formRuleSet=lateralRaiseRules(),
-            version=5,
+            version=4,
         )
         ExerciseBundle(ExerciseDefinition(RAISE_ID,1,"$RAISE_ID-def-v1","Dumbbell Lateral Raise",setOf("lateral raise","db lateral raise"),MovementFamily.RAISE),p,dumbbellGeneric)
     }
