@@ -17,6 +17,7 @@ data class MovementEngineOutput(
     val cueEvents: List<CueEvent>,
     val cueResponses: List<CueResponse>,
     val paused: Boolean,
+    val invalidAttempts:List<InvalidAttemptEvidence> = emptyList(),
 )
 
 class MovementInterpretationEngine(
@@ -39,6 +40,7 @@ class MovementInterpretationEngine(
         idNamespace,
     )
     private val signalHistory = ArrayDeque<MovementSignalFrame>()
+    private val primitiveHistory = ArrayDeque<MovementPrimitiveFrame>()
     private var lastTimestampUs: Long? = null
     private var interruptionOpen = false
 
@@ -46,6 +48,7 @@ class MovementInterpretationEngine(
         lastTimestampUs = null
         interruptionOpen = false
         signalHistory.clear()
+        primitiveHistory.clear()
         signalExtractor.reset()
         primitiveInterpreter.reset()
         repDetector.reset()
@@ -63,96 +66,104 @@ class MovementInterpretationEngine(
         val signals = signalExtractor.extract(
             timestampUs,pose,resolvedSignalProfile()
         )
-        val unavailableProgress = config.exerciseProfile.movementPrimitiveSequence.steps
-            .flatMap { it.progressSignalIds }.distinct()
-            .mapNotNull { id -> signals.values[id]?.takeUnless { it.isKnown } }
-        val missingProgress = config.exerciseProfile.movementPrimitiveSequence.steps
-            .flatMap { it.progressSignalIds }.any { it !in signals.values }
-        if (missingProgress || unavailableProgress.isNotEmpty()) {
-            // A coarse landmark fraction cannot authorize an UNKNOWN primary
-            // movement signal. Reset rep, arming and cue context as one episode.
-            // A derivative's first sample needs a second valid sample to warm up;
-            // do not erase that new history indefinitely while waiting for it.
-            val warmupOnly = !missingProgress && unavailableProgress.all {
-                it.unknownReason == SignalUnknownReason.INSUFFICIENT_HISTORY
+        val progressIds=config.exerciseProfile.movementPrimitiveSequence.steps
+            .flatMap{it.progressSignalIds}.distinct()
+        val unavailableProgress=progressIds.mapNotNull{id->signals.values[id]?.takeUnless{it.isKnown}}
+        val missingProgress=progressIds.any{it !in signals.values}
+        if(missingProgress||unavailableProgress.isNotEmpty()){
+            val warmupOnly=!missingProgress&&unavailableProgress.all{
+                it.unknownReason==SignalUnknownReason.INSUFFICIENT_HISTORY
             }
-            return interruptAcceptedTimestamp(timestampUs, resetSignals = !warmupOnly)
-                .copy(signals = signals)
+            return interruptAcceptedTimestamp(timestampUs,resetSignals=!warmupOnly)
+                .copy(signals=signals)
         }
-        interruptionOpen = false
+        interruptionOpen=false
         signalHistory.add(signals)
-        while (signalHistory.size > 1500) signalHistory.removeFirst()
-        val primitives = primitiveInterpreter.interpret(
+        while(signalHistory.size>1500)signalHistory.removeFirst()
+        val primitives=primitiveInterpreter.interpret(
             signals,config.exerciseProfile.movementPrimitiveSequence
         )
-        val repEvents = repDetector.update(primitives)
-        val evidence = mutableListOf<RepEvidence>()
-        val forms = mutableListOf<FormObservation>()
-        val cues = mutableListOf<CueEvent>()
-        val responses = mutableListOf<CueResponse>()
-        val snapshot = signalHistory.toList()
-        val completed = repEvents.filter {
-            it.kind == RepCompletionKind.COMPLETED
-        }
-        completed.forEach { event ->
-            val rep = evidenceBuilder.build(
-                event,snapshot,config,idNamespace
+        primitiveHistory.add(primitives)
+        while(primitiveHistory.size>1500)primitiveHistory.removeFirst()
+        val repEvents=repDetector.update(primitives)
+        val invalid=invalidAttempts(repEvents)
+        val evidence=mutableListOf<RepEvidence>()
+        val forms=mutableListOf<FormObservation>()
+        val cues=mutableListOf<CueEvent>()
+        val responses=mutableListOf<CueResponse>()
+        val signalSnapshot=signalHistory.toList()
+        val primitiveSnapshot=primitiveHistory.toList()
+        val completed=repEvents.filter{it.kind==RepCompletionKind.COMPLETED}
+        completed.forEach{event->
+            val rep=evidenceBuilder.build(
+                event,signalSnapshot,config,idNamespace,primitiveSnapshot
             )
-            val obs = formEngine.analyze(rep, AnalysisConfigResolver.forObservedView(config, observedViewClass))
-            val cueDecision = cueEngine.evaluate(rep, obs)
-            evidence += rep
-            forms += obs
-            cues += cueDecision.cues
-            responses += cueDecision.responses
+            val obs=formEngine.analyze(rep,AnalysisConfigResolver.forObservedView(config,observedViewClass))
+            val cueDecision=cueEngine.evaluate(rep,obs)
+            evidence+=rep
+            forms+=obs
+            cues+=cueDecision.cues
+            responses+=cueDecision.responses
         }
-        val through = completed.maxOfOrNull { it.completedAtUs }
-        if (through != null) {
-            while (
-                signalHistory.isNotEmpty() &&
-                signalHistory.first().timestampUs <= through
-            ) signalHistory.removeFirst()
+        val through=completed.maxOfOrNull{it.completedAtUs}
+        if(through!=null){
+            while(signalHistory.isNotEmpty()&&signalHistory.first().timestampUs<=through)signalHistory.removeFirst()
+            while(primitiveHistory.isNotEmpty()&&primitiveHistory.first().timestampUs<=through)primitiveHistory.removeFirst()
         }
         return MovementEngineOutput(
-            timestampUs, signals, primitives, repEvents, evidence,
-            forms, cues, responses, paused = false
+            timestampUs,signals,primitives,repEvents,evidence,
+            forms,cues,responses,paused=false,invalidAttempts=invalid
         )
     }
 
-    fun onInterruption(timestampUs: Long): MovementEngineOutput {
-        val last = lastTimestampUs
-        if (last != null && timestampUs <= last) return pausedOutput(timestampUs)
-        lastTimestampUs = timestampUs
+    fun onInterruption(timestampUs:Long):MovementEngineOutput{
+        val last=lastTimestampUs
+        if(last!=null&&timestampUs<=last)return pausedOutput(timestampUs)
+        lastTimestampUs=timestampUs
         return interruptAcceptedTimestamp(timestampUs)
     }
 
     private fun interruptAcceptedTimestamp(
-        timestampUs: Long,
-        resetSignals: Boolean = true,
-    ): MovementEngineOutput {
-        if (interruptionOpen) return pausedOutput(timestampUs)
-        interruptionOpen = true
-        val invalid = repDetector.onInterruption(timestampUs)
-        if (resetSignals) signalExtractor.reset()
+        timestampUs:Long,
+        resetSignals:Boolean=true,
+    ):MovementEngineOutput{
+        if(interruptionOpen)return pausedOutput(timestampUs)
+        interruptionOpen=true
+        val events=repDetector.onInterruption(timestampUs)
+        if(resetSignals)signalExtractor.reset()
         primitiveInterpreter.reset()
         signalHistory.clear()
+        primitiveHistory.clear()
         cueEngine.onInterruption()
         return MovementEngineOutput(
-            timestampUs,null,null,invalid,emptyList(),emptyList(),
-            emptyList(),emptyList(),paused=true
+            timestampUs,null,null,events,emptyList(),emptyList(),
+            emptyList(),emptyList(),paused=true,invalidAttempts=invalidAttempts(events)
         )
     }
 
-    private fun resolvedSignalProfile() =
+    private fun invalidAttempts(events:List<RepDetectionEvent>)=events
+        .filter{it.kind==RepCompletionKind.INVALID_ATTEMPT}
+        .map{event->
+            val base="attempt-${event.stepId}-${event.startedAtUs}-${event.completedAtUs}"
+            InvalidAttemptEvidence(
+                attemptId=idNamespace?.let{"$it/$base"}?:base,
+                stepId=event.stepId,
+                primitive=event.primitive,
+                startedAtUs=event.startedAtUs,
+                endedAtUs=event.completedAtUs,
+                reason=requireNotNull(event.invalidReason),
+                minConfidence=event.minConfidence,
+            )
+        }
+
+    private fun resolvedSignalProfile()=
         config.exerciseProfile.signalProfile.copy(
-            definitions = config.exerciseProfile.signalProfile.definitions.map { d ->
-                d.copy(
-                    parameters = config.resolvedSignalParameters[d.signalId]
-                        ?: d.parameters
-                )
+            definitions=config.exerciseProfile.signalProfile.definitions.map{d->
+                d.copy(parameters=config.resolvedSignalParameters[d.signalId]?:d.parameters)
             }
         )
 
-    private fun pausedOutput(ts: Long) = MovementEngineOutput(
+    private fun pausedOutput(ts:Long)=MovementEngineOutput(
         ts,null,null,emptyList(),emptyList(),emptyList(),emptyList(),
         emptyList(),paused=true
     )

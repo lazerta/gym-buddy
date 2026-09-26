@@ -25,6 +25,8 @@ class RoomChatGptContextRepository(
                 execution.exerciseId,
                 execution.startedAtUs,
                 execution.startedAtEpochMs,
+                execution.plannedExerciseId,
+                execution.equipmentContextId,
             ),
             evidence=evidence,
         )

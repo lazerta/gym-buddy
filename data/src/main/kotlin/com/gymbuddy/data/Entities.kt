@@ -19,6 +19,8 @@ data class ExerciseExecutionEntity(
     val exerciseId:String,
     val startedAtUs:Long,
     @ColumnInfo(defaultValue="0") val startedAtEpochMs:Long=0L,
+    val plannedExerciseId:String?=null,
+    val equipmentContextId:String?=null,
 )
 
 @Entity(
@@ -34,13 +36,30 @@ data class SetEntity(
     val actualLoadValue:Double?,
     val actualLoadUnit:String?,
     @ColumnInfo(defaultValue="0") val startedAtEpochMs:Long=0L,
+    @ColumnInfo(defaultValue="'UNKNOWN'") val actualLoadBasis:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val actualLoadSource:String="UNKNOWN",
+    val plannedLoadValue:Double?=null,
+    val plannedLoadUnit:String?=null,
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedLoadBasis:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedLoadSource:String="UNKNOWN",
 )
 
 @Entity(tableName="analysis_contexts",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)])
 data class AnalysisContextEntity(@PrimaryKey val setId:String,val exerciseDefinitionId:String,val exerciseDefinitionVersion:Int,val exerciseDefinitionSemanticHash:String,val exerciseProfileId:String,val exerciseProfileVersion:Int,val exerciseProfileSemanticHash:String,val cameraProfileId:String,val cameraProfileVersion:Int,val cameraProfileSemanticHash:String,val signalProfileId:String,val signalProfileVersion:Int,val signalProfileSemanticHash:String,val primitiveProfileId:String,val primitiveProfileVersion:Int,val primitiveProfileSemanticHash:String,val metricProfileId:String,val metricProfileVersion:Int,val metricProfileSemanticHash:String,val formRuleSetId:String,val formRuleSetVersion:Int,val formRuleSetSemanticHash:String,val cuePolicyId:String,val cuePolicyVersion:Int,val cuePolicySemanticHash:String,val equipmentProfileId:String?,val equipmentProfileVersion:Int?,val equipmentProfileSemanticHash:String?,val calibrationProfileId:String?,val calibrationProfileVersion:Int?,val calibrationProfileSemanticHash:String?)
 
 @Entity(tableName="rep_evidence",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)],indices=[Index("setId"),Index(value=["setId","repOrdinal"],unique=true)])
-data class RepEvidenceEntity(@PrimaryKey val repId:String,val setId:String,val repOrdinal:Int,val stepId:String,val primitive:String,val startedAtUs:Long,val completedAtUs:Long,val classification:String)
+data class RepEvidenceEntity(
+    @PrimaryKey val repId:String,
+    val setId:String,
+    val repOrdinal:Int,
+    val stepId:String,
+    val primitive:String,
+    val startedAtUs:Long,
+    val completedAtUs:Long,
+    val classification:String,
+    @ColumnInfo(defaultValue="'NOT_ASSESSED'") val assistanceAssessment:String="NOT_ASSESSED",
+    val assistanceScore:Double?=null,
+)
 
 @Entity(tableName="rep_signal_evidence",primaryKeys=["repId","signalId"],foreignKeys=[ForeignKey(entity=RepEvidenceEntity::class,parentColumns=["repId"],childColumns=["repId"],onDelete=ForeignKey.CASCADE)],indices=[Index("repId")])
 data class RepSignalEvidenceEntity(val repId:String,val signalId:String,val unit:String,val minValue:Double?,val maxValue:Double?,val meanValue:Double?,val lastValue:Double?,val confidence:Double?)
@@ -88,7 +107,17 @@ data class SetSummaryEntity(
 )
 
 @Entity(tableName="workout_flow_states",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["completedSetId"],onDelete=ForeignKey.CASCADE)],indices=[Index("completedSetId")])
-data class WorkoutFlowStateEntity(@PrimaryKey val checkpointId:String,val completedSetId:String,@ColumnInfo(defaultValue="'REST'") val state:String,val focus:String,val plannedNextLoadValue:Double?,val plannedNextLoadUnit:String?,val restStartedAtEpochMs:Long)
+data class WorkoutFlowStateEntity(
+    @PrimaryKey val checkpointId:String,
+    val completedSetId:String,
+    @ColumnInfo(defaultValue="'REST'") val state:String,
+    val focus:String,
+    val plannedNextLoadValue:Double?,
+    val plannedNextLoadUnit:String?,
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedNextLoadBasis:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedNextLoadSource:String="UNKNOWN",
+    val restStartedAtEpochMs:Long,
+)
 
 @Entity(tableName="interrupted_sets",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)])
 data class InterruptedSetEntity(@PrimaryKey val setId:String,val recoveredAtEpochMs:Long,val committedReps:Int)
@@ -105,4 +134,86 @@ data class PersonalCalibrationProfileHistoryEntity(
     val profileVersion:Int,
     val semanticHash:String,
     val payload:String,
+)
+
+
+@Entity(
+    tableName="rep_phase_evidence",
+    primaryKeys=["repId","phaseOrdinal"],
+    foreignKeys=[ForeignKey(entity=RepEvidenceEntity::class,parentColumns=["repId"],childColumns=["repId"],onDelete=ForeignKey.CASCADE)],
+    indices=[Index("repId")],
+)
+data class RepPhaseEvidenceEntity(
+    val repId:String,
+    val phaseOrdinal:Int,
+    val phase:String,
+    val startedAtUs:Long,
+    val endedAtUs:Long,
+    val confidence:Double?,
+)
+
+@Entity(
+    tableName="invalid_attempt_evidence",
+    foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)],
+    indices=[Index("setId")],
+)
+data class InvalidAttemptEvidenceEntity(
+    @PrimaryKey val attemptId:String,
+    val setId:String,
+    val stepId:String,
+    val primitive:String,
+    val startedAtUs:Long,
+    val endedAtUs:Long,
+    val reason:String,
+    val minConfidence:Double?,
+)
+
+@Entity(tableName="exercise_preferences")
+data class ExercisePreferenceEntity(
+    @PrimaryKey val exerciseId:String,
+    val favorite:Boolean,
+    val lastSelectedAtEpochMs:Long,
+    val equipmentContextId:String?,
+)
+
+@Entity(tableName="equipment_contexts")
+data class EquipmentContextEntity(
+    @PrimaryKey val contextId:String,
+    val baseEquipmentProfileId:String,
+    val label:String,
+    val updatedAtEpochMs:Long,
+)
+
+@Entity(
+    tableName="workout_exercise_completions",
+    primaryKeys=["sessionId","exerciseId"],
+    indices=[Index("sessionId")],
+)
+data class WorkoutExerciseCompletionEntity(
+    val sessionId:String,
+    val exerciseId:String,
+    val completedSets:Int,
+    val completedAtEpochMs:Long,
+)
+
+@Entity(tableName="workout_product_state")
+data class WorkoutProductStateEntity(
+    @PrimaryKey val slotId:String,
+    val activeSessionId:String?,
+)
+
+@Entity(
+    tableName="gpt_analyses",
+    foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)],
+    indices=[Index("setId"),Index(value=["setId","createdAtEpochMs"])],
+)
+data class GptAnalysisEntity(
+    @PrimaryKey val analysisId:String,
+    val setId:String,
+    val schemaVersion:Int,
+    val modelLabel:String,
+    val createdAtEpochMs:Long,
+    val sourceSetIdsPayload:String,
+    val summary:String,
+    val recommendationsPayload:String,
 )

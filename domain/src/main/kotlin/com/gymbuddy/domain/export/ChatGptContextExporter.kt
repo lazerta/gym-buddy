@@ -137,11 +137,14 @@ class ChatGptContextExporter(
             "execution_started_at_us" to num(context.execution.startedAtUs),
             "execution_started_at_epoch_ms" to num(context.execution.startedAtEpochMs),
             "exercise_id" to str(context.execution.exerciseId),
+            "planned_exercise_id" to str(context.execution.plannedExerciseId),
+            "equipment_context_id" to str(context.execution.equipmentContextId),
             "set" to obj(
                 "ordinal" to num(evidence.set.setOrdinal),
                 "started_at_us" to num(evidence.set.startedAtUs),
                 "started_at_epoch_ms" to num(evidence.set.startedAtEpochMs),
                 "actual_load" to load(evidence.set.actualLoad),
+                "planned_load" to load(evidence.set.plannedLoad),
                 "summary" to setSummary(evidence.summary),
                 "tracking" to tracking(evidence.tracking),
             ),
@@ -151,6 +154,17 @@ class ChatGptContextExporter(
             "cues" to arr(cues.map{cue(it,evidence.cueObservationIds[it.cueId])}),
             "cue_responses" to arr(responses.map(::response)),
             "cue_deliveries" to arr(deliveries.map(::delivery)),
+            "invalid_attempts" to arr(evidence.invalidAttempts.map{attempt->
+                obj(
+                    "source_ref" to str(attempt.attemptId),
+                    "step_id" to str(attempt.stepId),
+                    "primitive" to str(attempt.primitive.name),
+                    "started_at_us" to num(attempt.startedAtUs),
+                    "ended_at_us" to num(attempt.endedAtUs),
+                    "reason" to str(attempt.reason.name),
+                    "min_confidence" to num(attempt.minConfidence),
+                )
+            }),
         )
     }
 
@@ -196,6 +210,18 @@ class ChatGptContextExporter(
         "started_at_us" to num(rep.startedAtUs),
         "completed_at_us" to num(rep.completedAtUs),
         "classification" to str(rep.classification.name),
+        "assistance_assessment" to str(rep.assistanceAssessment.name),
+        "assistance_score" to num(rep.assistanceScore),
+        "phase_intervals" to arr(rep.phaseIntervals.mapIndexed{index,phase->
+            obj(
+                "source_ref" to str(rep.repId+"/phase/"+index),
+                "phase" to str(phase.phase.name),
+                "started_at_us" to num(phase.startedAtUs),
+                "ended_at_us" to num(phase.endedAtUs),
+                "duration_us" to num(phase.durationUs),
+                "confidence" to num(phase.confidence),
+            )
+        }),
         "signals" to arr(rep.signals.values.sortedBy{it.signalId}.map{signal(rep.repId,it)}),
         "metrics" to arr(rep.metrics.values.sortedBy{it.metricId}.map{metric(rep.repId,it)}),
     )
@@ -266,6 +292,8 @@ class ChatGptContextExporter(
             obj(
                 "value" to num(it.value),
                 "unit" to str(it.unit),
+                "basis" to str(it.basis.name),
+                "source" to str(it.source.name),
             )
         }?:"null"
 
@@ -341,6 +369,8 @@ class ChatGptContextExporter(
             "rep_ids" to strings(reps.map{it.repId}),
             "signal_refs" to strings(reps.flatMap{rep->rep.signals.values.map{rep.repId+"/signal/"+it.signalId}}),
             "metric_refs" to strings(reps.flatMap{rep->rep.metrics.values.map{rep.repId+"/metric/"+it.metricId}}),
+            "phase_refs" to strings(reps.flatMap{rep->rep.phaseIntervals.indices.map{rep.repId+"/phase/"+it}}),
+            "invalid_attempt_refs" to strings(contexts.flatMap{it.evidence.invalidAttempts}.map{it.attemptId}),
             "observation_ids" to strings(contexts.flatMap{it.evidence.observations}.map{it.observationId}),
             "cue_ids" to strings(contexts.flatMap{it.evidence.cues}.map{it.cueId}),
             "cue_response_refs" to strings(contexts.flatMap{it.evidence.responses}.map{it.cueId+":"+it.repId}),

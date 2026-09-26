@@ -3,6 +3,7 @@ package com.gymbuddy.domain.persistence
 import com.gymbuddy.domain.coaching.CueEvent
 import com.gymbuddy.domain.coaching.CueResponse
 import com.gymbuddy.domain.evidence.FormObservation
+import com.gymbuddy.domain.evidence.InvalidAttemptEvidence
 import com.gymbuddy.domain.evidence.RepEvidence
 import com.gymbuddy.domain.profile.AnalysisConfig
 import com.gymbuddy.domain.profile.AnalysisProvenance
@@ -28,11 +29,15 @@ data class ExerciseExecutionRecord(
     val exerciseId:String,
     val startedAtUs:Long,
     val startedAtEpochMs:Long=0L,
+    val plannedExerciseId:String?=null,
+    val equipmentContextId:String?=null,
 ){
     init{
         requireId(executionId,"executionId")
         requireId(sessionId,"sessionId")
         requireId(exerciseId,"exerciseId")
+        require(plannedExerciseId==null||plannedExerciseId.isNotBlank())
+        require(equipmentContextId==null||equipmentContextId.isNotBlank())
         requireTimestamp(startedAtUs,"startedAtUs")
         requireTimestamp(startedAtEpochMs,"startedAtEpochMs")
     }
@@ -44,6 +49,7 @@ data class SetRecord(
     val startedAtUs:Long,
     val actualLoad:LoadSnapshot?=null,
     val startedAtEpochMs:Long=0L,
+    val plannedLoad:LoadSnapshot?=null,
 ){
     init{
         requireId(setId,"setId")
@@ -112,6 +118,7 @@ data class PersistedSetEvidence(
     val summary:SetSummary?,
     val cueDeliveries:List<CueDeliveryRecord> = emptyList(),
     val cueObservationIds:Map<String,String?> = emptyMap(),
+    val invalidAttempts:List<InvalidAttemptEvidence> = emptyList(),
 )
 
 interface EvidenceRepository {
@@ -123,6 +130,7 @@ interface EvidenceRepository {
     fun persistCueEvent(setId:String,cue:CueEvent,observationId:String?=null)
     fun persistCueResponse(setId:String,response:CueResponse)
     fun persistCueDelivery(record:CueDeliveryRecord)
+    fun persistInvalidAttempt(setId:String,attempt:InvalidAttemptEvidence)
     fun upsertTrackingSummary(summary:TrackingQualitySummary)
     fun finishSet(summary:SetSummary)
     fun loadSet(setId:String):PersistedSetEvidence?

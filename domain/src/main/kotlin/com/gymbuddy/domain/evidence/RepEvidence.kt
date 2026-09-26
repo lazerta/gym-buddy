@@ -10,7 +10,55 @@ sealed interface EvidenceValue {
 }
 data class SignalEvidence(val signalId:String,val unit:SignalUnit,val min:Double?,val max:Double?,val mean:Double?,val last:Double?,val confidence:Double?)
 data class MetricEvidence(val metricId:String,val unit:SignalUnit,val value:EvidenceValue)
-data class RepEvidence(val repId:String,val ordinal:Int,val stepId:String,val primitive:MovementPrimitive,val startedAtUs:Long,val completedAtUs:Long,val classification:RepClassification,val signals:Map<String,SignalEvidence>,val metrics:Map<String,MetricEvidence>,val provenance:AnalysisProvenance)
+enum class AssistanceAssessmentState { NOT_ASSESSED, OBSERVED }
+data class RepPhaseInterval(
+    val phase:PrimitivePhase,
+    val startedAtUs:Long,
+    val endedAtUs:Long,
+    val confidence:Double?,
+){
+    init{
+        require(phase!=PrimitivePhase.UNKNOWN)
+        require(startedAtUs>=0L&&endedAtUs>=startedAtUs)
+        confidence?.let{require(it.isFinite()&&it in 0.0..1.0)}
+    }
+    val durationUs:Long get()=endedAtUs-startedAtUs
+}
+data class InvalidAttemptEvidence(
+    val attemptId:String,
+    val stepId:String,
+    val primitive:MovementPrimitive,
+    val startedAtUs:Long,
+    val endedAtUs:Long,
+    val reason:RepInvalidReason,
+    val minConfidence:Double?,
+){
+    init{
+        require(attemptId.isNotBlank()&&stepId.isNotBlank())
+        require(startedAtUs>=0L&&endedAtUs>=startedAtUs)
+        minConfidence?.let{require(it.isFinite()&&it in 0.0..1.0)}
+    }
+}
+data class RepEvidence(
+    val repId:String,
+    val ordinal:Int,
+    val stepId:String,
+    val primitive:MovementPrimitive,
+    val startedAtUs:Long,
+    val completedAtUs:Long,
+    val classification:RepClassification,
+    val signals:Map<String,SignalEvidence>,
+    val metrics:Map<String,MetricEvidence>,
+    val provenance:AnalysisProvenance,
+    val phaseIntervals:List<RepPhaseInterval> = emptyList(),
+    val assistanceAssessment:AssistanceAssessmentState=AssistanceAssessmentState.NOT_ASSESSED,
+    val assistanceScore:Double?=null,
+){
+    init{
+        assistanceScore?.let{require(it.isFinite()&&it in 0.0..1.0)}
+        require((assistanceAssessment==AssistanceAssessmentState.OBSERVED)==(assistanceScore!=null))
+    }
+}
 
 class RepEvidenceBuilder {
     fun build(
@@ -18,6 +66,7 @@ class RepEvidenceBuilder {
         frames:List<MovementSignalFrame>,
         config:AnalysisConfig,
         idNamespace:String?=null,
+        primitiveFrames:List<MovementPrimitiveFrame> = emptyList(),
     ):RepEvidence{
         require(event.kind==RepCompletionKind.COMPLETED)
         val relevant=frames.filter{it.timestampUs in event.startedAtUs..event.completedAtUs}
@@ -40,10 +89,42 @@ class RepEvidenceBuilder {
         }
         val baseId="rep-"+event.ordinal+"-"+event.completedAtUs
         val repId=idNamespace?.let{it+"/"+baseId}?:baseId
+        val phases=phaseIntervals(event,primitiveFrames)
         return RepEvidence(
             repId,event.ordinal,event.stepId,event.primitive,event.startedAtUs,
-            event.completedAtUs,event.classification!!,signals,metrics,config.provenance
+            event.completedAtUs,event.classification!!,signals,metrics,config.provenance,
+            phaseIntervals=phases,
+            assistanceAssessment=if(event.maxAssistance==null) AssistanceAssessmentState.NOT_ASSESSED else AssistanceAssessmentState.OBSERVED,
+            assistanceScore=event.maxAssistance,
         )
+    }
+
+    private fun phaseIntervals(
+        event:RepDetectionEvent,
+        frames:List<MovementPrimitiveFrame>,
+    ):List<RepPhaseInterval>{
+        val observations=frames.asSequence()
+            .filter{it.timestampUs in event.startedAtUs..event.completedAtUs}
+            .mapNotNull{it.observations[event.stepId]}
+            .filter{it.phase!=PrimitivePhase.UNKNOWN&&it.phase!=PrimitivePhase.SETUP}
+            .toList()
+        if(observations.isEmpty())return emptyList()
+        val out=mutableListOf<RepPhaseInterval>()
+        var phase=observations.first().phase
+        var start=observations.first().timestampUs
+        var confidence=observations.first().confidence
+        observations.drop(1).forEach{obs->
+            if(obs.phase!=phase){
+                out+=RepPhaseInterval(phase,start,obs.timestampUs,confidence)
+                phase=obs.phase
+                start=obs.timestampUs
+                confidence=obs.confidence
+            }else{
+                confidence=listOfNotNull(confidence,obs.confidence).minOrNull()
+            }
+        }
+        out+=RepPhaseInterval(phase,start,event.completedAtUs,confidence)
+        return out
     }
 
     private fun metricValue(

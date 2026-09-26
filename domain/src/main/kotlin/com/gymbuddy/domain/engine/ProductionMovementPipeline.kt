@@ -218,9 +218,9 @@ class ProductionMovementPipeline(
                 result(
                     frame.timestampUs,
                     lock,
-                    if (movement.paused) tracking.copy(
-                        state = TrackingQualityState.PAUSED,
-                        reason = TrackingQualityReason.INSUFFICIENT_EVIDENCE,
+                    if(movement.paused) tracking.copy(
+                        state=TrackingQualityState.PAUSED,
+                        reason=TrackingQualityReason.INSUFFICIENT_EVIDENCE,
                     ) else tracking,
                     movement,
                     guidance,

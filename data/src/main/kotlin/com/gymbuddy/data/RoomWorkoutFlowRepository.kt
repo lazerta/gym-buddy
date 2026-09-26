@@ -1,9 +1,12 @@
 package com.gymbuddy.data
 
+import com.gymbuddy.domain.evidence.EvidenceSummaryEngine
 import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.CompletedSetRecord
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
+import com.gymbuddy.domain.persistence.LoadBasis
 import com.gymbuddy.domain.persistence.LoadSnapshot
+import com.gymbuddy.domain.persistence.LoadSource
 import com.gymbuddy.domain.persistence.RestCheckpoint
 import com.gymbuddy.domain.persistence.RestCheckpointDraft
 import com.gymbuddy.domain.persistence.SetRecord
@@ -12,6 +15,7 @@ import com.gymbuddy.domain.persistence.WorkoutSessionRecord
 
 class RoomWorkoutFlowRepository(
     private val dao:EvidenceDao,
+    private val summaryEngine:EvidenceSummaryEngine?=null,
 ):WorkoutFlowRepository{
     override fun saveActiveSetCheckpoint(setId:String){
         requireNotNull(dao.set(setId))
@@ -23,6 +27,8 @@ class RoomWorkoutFlowRepository(
                 focus=ACTIVE_FOCUS,
                 plannedNextLoadValue=null,
                 plannedNextLoadUnit=null,
+                plannedNextLoadBasis=LoadBasis.UNKNOWN.name,
+                plannedNextLoadSource=LoadSource.UNKNOWN.name,
                 restStartedAtEpochMs=0L,
             )
         )
@@ -39,6 +45,8 @@ class RoomWorkoutFlowRepository(
                 focus=checkpoint.focus,
                 plannedNextLoadValue=checkpoint.plannedNextLoad?.value,
                 plannedNextLoadUnit=checkpoint.plannedNextLoad?.unit,
+                plannedNextLoadBasis=checkpoint.plannedNextLoad?.basis?.name?:LoadBasis.UNKNOWN.name,
+                plannedNextLoadSource=checkpoint.plannedNextLoad?.source?.name?:LoadSource.UNKNOWN.name,
                 restStartedAtEpochMs=checkpoint.restStartedAtEpochMs,
             )
         )
@@ -61,14 +69,19 @@ class RoomWorkoutFlowRepository(
                 execution.exerciseId,
                 execution.startedAtUs,
                 execution.startedAtEpochMs,
+                execution.plannedExerciseId,
+                execution.equipmentContextId,
             ),
             completedSet=set.toRecord(),
             previousReps=summary.completedReps,
-            focus=state.focus,
-            plannedNextLoad=loadSnapshot(state.plannedNextLoadValue,state.plannedNextLoadUnit),
+            focus=focusForSet(set.setId)?:state.focus,
+            plannedNextLoad=loadSnapshot(
+                state.plannedNextLoadValue,state.plannedNextLoadUnit,
+                state.plannedNextLoadBasis,state.plannedNextLoadSource,
+            ),
             restStartedAtEpochMs=state.restStartedAtEpochMs,
             completedSets=completedHistory(execution,set.setOrdinal).map { result ->
-                if(result.set.setId==set.setId)result.copy(focus=state.focus) else result
+                if(result.set.setId==set.setId)result.copy(focus=focusForSet(set.setId)?:state.focus) else result
             },
         )
     }
@@ -91,6 +104,8 @@ class RoomWorkoutFlowRepository(
                 execution.exerciseId,
                 execution.startedAtUs,
                 execution.startedAtEpochMs,
+                execution.plannedExerciseId,
+                execution.equipmentContextId,
             ),
             set=set.toRecord(),
             committedReps=committed,
@@ -128,21 +143,30 @@ class RoomWorkoutFlowRepository(
         .sortedBy { it.setOrdinal }
         .map { set ->
             val summary=requireNotNull(dao.setSummary(set.setId))
-            CompletedSetRecord(set.toRecord(),summary.completedReps)
+            CompletedSetRecord(set.toRecord(),summary.completedReps,focusForSet(set.setId)?:"Repeat the same setup.")
         }
+
+    private fun focusForSet(id:String):String?{
+        val engine=summaryEngine?:return null
+        val evidence=RoomEvidenceRepository(dao).loadSet(id)?:return null
+        return engine.summarize(evidence).focusText
+    }
 
     private fun SetEntity.toRecord()=SetRecord(
         setId,
         executionId,
         setOrdinal,
         startedAtUs,
-        loadSnapshot(actualLoadValue,actualLoadUnit),
+        loadSnapshot(actualLoadValue,actualLoadUnit,actualLoadBasis,actualLoadSource),
         startedAtEpochMs,
+        loadSnapshot(plannedLoadValue,plannedLoadUnit,plannedLoadBasis,plannedLoadSource),
     )
 
-    private fun loadSnapshot(value:Double?,unit:String?):LoadSnapshot?{
+    private fun loadSnapshot(
+        value:Double?,unit:String?,basis:String=LoadBasis.UNKNOWN.name,source:String=LoadSource.UNKNOWN.name,
+    ):LoadSnapshot?{
         require(value!=null||unit==null)
-        return value?.let{LoadSnapshot(it,unit)}
+        return value?.let{LoadSnapshot(it,unit,LoadBasis.valueOf(basis),LoadSource.valueOf(source))}
     }
 
     companion object {

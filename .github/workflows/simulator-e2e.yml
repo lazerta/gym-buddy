@@ -275,6 +275,7 @@ jobs:
           path: |
             e2e-results.json
             production-movement-e2e.json
+            step3-review-e2e.json
             postmerge-integration-e2e.json
             runtime-boundary-e2e.json
             frame-server.log

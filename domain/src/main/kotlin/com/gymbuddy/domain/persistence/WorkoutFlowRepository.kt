@@ -3,6 +3,8 @@ package com.gymbuddy.domain.persistence
 data class LoadSnapshot(
     val value:Double,
     val unit:String?=null,
+    val basis:LoadBasis=LoadBasis.UNKNOWN,
+    val source:LoadSource=LoadSource.UNKNOWN,
 ){
     init{
         require(value.isFinite()){"load value must be finite"}

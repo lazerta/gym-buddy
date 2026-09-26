@@ -30,6 +30,14 @@ internal class WorkoutSessionIdentity(
     var executionStartedAtEpochMs:Long?=null
         private set
 
+    data class Snapshot(val sessionId:String?,val executionId:String?,val sessionUs:Long?,val executionUs:Long?,val sessionEpoch:Long?,val executionEpoch:Long?)
+    fun snapshot()=Snapshot(sessionId,executionId,sessionStartedAtUs,executionStartedAtUs,sessionStartedAtEpochMs,executionStartedAtEpochMs)
+    fun restore(value:Snapshot){
+        sessionId=value.sessionId;executionId=value.executionId
+        sessionStartedAtUs=value.sessionUs;executionStartedAtUs=value.executionUs
+        sessionStartedAtEpochMs=value.sessionEpoch;executionStartedAtEpochMs=value.executionEpoch
+    }
+
     fun beginExercise(exerciseId:String):ExerciseIdentity{
         require(exerciseId.isNotBlank())
         val session=sessionId?:idFactory().also{sessionId=it}
@@ -60,6 +68,31 @@ internal class WorkoutSessionIdentity(
         this.executionStartedAtUs=executionStartedAtUs
         this.sessionStartedAtEpochMs=sessionStartedAtEpochMs
         this.executionStartedAtEpochMs=executionStartedAtEpochMs
+    }
+
+    fun resumeSession(
+        sessionId:String,
+        sessionStartedAtUs:Long,
+        sessionStartedAtEpochMs:Long=0L,
+    ){
+        require(sessionId.isNotBlank())
+        require(sessionStartedAtUs>=0L)
+        require(sessionStartedAtEpochMs>=0L)
+        this.sessionId=sessionId
+        this.sessionStartedAtUs=sessionStartedAtUs
+        this.sessionStartedAtEpochMs=sessionStartedAtEpochMs
+        this.executionId=null
+        this.executionStartedAtUs=null
+        this.executionStartedAtEpochMs=null
+    }
+
+    fun reset(){
+        sessionId=null
+        executionId=null
+        sessionStartedAtUs=null
+        executionStartedAtUs=null
+        sessionStartedAtEpochMs=null
+        executionStartedAtEpochMs=null
     }
 
     fun ensureStarted(

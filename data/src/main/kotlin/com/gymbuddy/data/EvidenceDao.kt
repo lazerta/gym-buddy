@@ -1,5 +1,6 @@
 package com.gymbuddy.data
 import androidx.room.*
+import com.gymbuddy.domain.persistence.*
 
 @Dao abstract class EvidenceDao {
     @Insert(onConflict=OnConflictStrategy.IGNORE) abstract fun insertSession(e:WorkoutSessionEntity):Long
@@ -9,6 +10,8 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertRep(e:RepEvidenceEntity)
     @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertSignals(e:List<RepSignalEvidenceEntity>)
     @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertMetrics(e:List<RepMetricEvidenceEntity>)
+    @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertPhases(e:List<RepPhaseEvidenceEntity>)
+    @Insert(onConflict=OnConflictStrategy.IGNORE) abstract fun insertInvalidAttempt(e:InvalidAttemptEvidenceEntity):Long
     @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertObservation(e:FormObservationEntity)
     @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertObservations(e:List<FormObservationEntity>)
     @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertCue(e:CueEventEntity)
@@ -22,6 +25,11 @@ import androidx.room.*
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertInterruptedSet(e:InterruptedSetEntity)
     @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertPersonalCalibration(e:PersonalCalibrationProfileEntity)
     @Insert(onConflict=OnConflictStrategy.IGNORE) abstract fun insertPersonalCalibrationHistory(e:PersonalCalibrationProfileHistoryEntity):Long
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertExercisePreference(e:ExercisePreferenceEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertEquipmentContext(e:EquipmentContextEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutExerciseCompletion(e:WorkoutExerciseCompletionEntity)
+    @Insert(onConflict=OnConflictStrategy.REPLACE) abstract fun upsertWorkoutProductState(e:WorkoutProductStateEntity)
+    @Insert(onConflict=OnConflictStrategy.ABORT) abstract fun insertGptAnalysis(e:GptAnalysisEntity)
 
     @Query("SELECT * FROM workout_sessions WHERE sessionId=:id") abstract fun session(id:String):WorkoutSessionEntity?
     @Query("SELECT * FROM exercise_executions WHERE executionId=:id") abstract fun execution(id:String):ExerciseExecutionEntity?
@@ -32,6 +40,8 @@ import androidx.room.*
     @Query("SELECT * FROM rep_evidence WHERE setId=:id ORDER BY repOrdinal, repId") abstract fun repsForSet(id:String):List<RepEvidenceEntity>
     @Query("SELECT * FROM rep_signal_evidence WHERE repId=:id ORDER BY signalId") abstract fun signalsForRep(id:String):List<RepSignalEvidenceEntity>
     @Query("SELECT * FROM rep_metric_evidence WHERE repId=:id ORDER BY metricId") abstract fun metricsForRep(id:String):List<RepMetricEvidenceEntity>
+    @Query("SELECT * FROM rep_phase_evidence WHERE repId=:id ORDER BY phaseOrdinal") abstract fun phasesForRep(id:String):List<RepPhaseEvidenceEntity>
+    @Query("SELECT * FROM invalid_attempt_evidence WHERE setId=:id ORDER BY startedAtUs, attemptId") abstract fun invalidAttemptsForSet(id:String):List<InvalidAttemptEvidenceEntity>
     @Query("SELECT * FROM form_observations WHERE observationId=:id") abstract fun observation(id:String):FormObservationEntity?
     @Query("SELECT f.* FROM form_observations f JOIN rep_evidence r ON r.repId=f.repId WHERE f.setId=:id ORDER BY r.repOrdinal, f.observationId") abstract fun observationsForSet(id:String):List<FormObservationEntity>
     @Query("SELECT * FROM cue_events WHERE cueId=:id") abstract fun cue(id:String):CueEventEntity?
@@ -139,8 +149,78 @@ import androidx.room.*
     @Query("SELECT * FROM personal_calibration_profile_history WHERE calibrationProfileId=:profileId AND profileVersion=:profileVersion") abstract fun personalCalibrationHistory(profileId:String,profileVersion:Int):PersonalCalibrationProfileHistoryEntity?
     @Query("DELETE FROM personal_calibration_profiles WHERE slotId=:slotId") abstract fun deletePersonalCalibration(slotId:String)
 
-    /** Called only when an attempt is opened, not during camera setup. Preserve
-     * the previous REST checkpoint if either the set or its recovery write fails. */
+    @Query("SELECT * FROM exercise_preferences ORDER BY favorite DESC, lastSelectedAtEpochMs DESC, exerciseId") abstract fun exercisePreferences():List<ExercisePreferenceEntity>
+    @Query("SELECT * FROM equipment_contexts ORDER BY updatedAtEpochMs DESC, contextId") abstract fun equipmentContexts():List<EquipmentContextEntity>
+    @Query("SELECT * FROM workout_exercise_completions WHERE sessionId=:sessionId ORDER BY completedAtEpochMs, exerciseId") abstract fun workoutCompletions(sessionId:String):List<WorkoutExerciseCompletionEntity>
+    @Query("DELETE FROM workout_exercise_completions WHERE sessionId=:sessionId") abstract fun deleteWorkoutCompletions(sessionId:String)
+    @Query("SELECT * FROM workout_product_state WHERE slotId=:slotId") abstract fun workoutProductState(slotId:String):WorkoutProductStateEntity?
+    @Query("SELECT * FROM gpt_analyses WHERE setId=:setId ORDER BY createdAtEpochMs, analysisId") abstract fun gptAnalysesForSet(setId:String):List<GptAnalysisEntity>
+
+    @Query("SELECT * FROM gpt_analyses WHERE analysisId=:id") abstract fun gptAnalysis(id:String):GptAnalysisEntity?
+
+    @Transaction open fun readProductSnapshot():WorkoutSelectionSnapshot{
+        val active=workoutProductState("active")?.activeSessionId
+        return WorkoutSelectionSnapshot(active,
+            exercisePreferences().map{ExercisePreferenceRecord(it.exerciseId,it.favorite,it.lastSelectedAtEpochMs,it.equipmentContextId)},
+            active?.let(::workoutCompletions).orEmpty().map{WorkoutExerciseCompletionRecord(it.sessionId,it.exerciseId,it.completedSets,it.completedAtEpochMs)},
+            equipmentContexts().map{EquipmentContextRecord(it.contextId,it.baseEquipmentProfileId,it.label,it.updatedAtEpochMs)})
+    }
+
+    @Transaction open fun rememberSelection(record:ExercisePreferenceRecord){
+        val current=exercisePreferences().firstOrNull{it.exerciseId==record.exerciseId}
+        upsertExercisePreference(ExercisePreferenceEntity(record.exerciseId,current?.favorite?:record.favorite,
+            maxOf(current?.lastSelectedAtEpochMs?:0,record.lastSelectedAtEpochMs),
+            record.equipmentContextId?:current?.equipmentContextId))
+    }
+
+    @Transaction open fun changeFavorite(id:String,favorite:Boolean){
+        require(id.isNotBlank())
+        val current=exercisePreferences().firstOrNull{it.exerciseId==id}
+        upsertExercisePreference(ExercisePreferenceEntity(id,favorite,current?.lastSelectedAtEpochMs?:0,current?.equipmentContextId))
+    }
+
+    @Transaction open fun rememberEquipmentForExercise(id:String,record:EquipmentContextRecord){
+        require(id.isNotBlank())
+        val existing=equipmentContexts().firstOrNull{it.contextId==record.contextId}
+        require(existing==null||existing.baseEquipmentProfileId==record.baseEquipmentProfileId){"equipment identity cannot change base profile"}
+        upsertEquipmentContext(EquipmentContextEntity(record.contextId,record.baseEquipmentProfileId,record.label,record.updatedAtEpochMs))
+        rememberSelection(ExercisePreferenceRecord(id,equipmentContextId=record.contextId))
+    }
+
+    @Transaction open fun startNewWorkout(){
+        // Roll back the active-session slot too if clearing recovery fails.
+        upsertWorkoutProductState(WorkoutProductStateEntity("active",null))
+        deleteWorkoutFlowState("active")
+    }
+
+    @Transaction open fun completeExerciseFromHistory(sessionId:String,exerciseId:String,epochMs:Long){
+        requireNotNull(session(sessionId))
+        val count=completedSetIdsForSessionExercise(sessionId,exerciseId).size
+        require(count>0){"exercise has no completed sets"}
+        val previous=workoutCompletions(sessionId).firstOrNull{it.exerciseId==exerciseId}
+        upsertWorkoutExerciseCompletion(WorkoutExerciseCompletionEntity(sessionId,exerciseId,count,
+            maxOf(previous?.completedAtEpochMs?:0,epochMs)))
+        val checkpoint=workoutFlowState("active")
+        val checkpointExecution=checkpoint?.let{set(it.completedSetId)}?.let{execution(it.executionId)}
+        if(checkpointExecution?.sessionId==sessionId && checkpointExecution.exerciseId==exerciseId){
+            deleteWorkoutFlowState("active")
+        }
+    }
+
+    @Transaction open fun appendAnalysis(record:GptAnalysisEntity,sourceIds:List<String>){
+        require(record.setId in sourceIds)
+        sourceIds.forEach{id->
+            requireNotNull(set(id)){"missing GPT analysis source set: $id"}
+            requireNotNull(setSummary(id)){"GPT analysis source must be completed: $id"}
+        }
+        val existing=gptAnalysis(record.analysisId)
+        if(existing!=null){
+            require(existing==record){"published GPT analysis is immutable"}
+            return // retry of the same immutable publication, not a second analysis
+        }
+        insertGptAnalysis(record)
+    }
+
     @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){
         insertSet(s)
         insertAnalysisContext(c)
@@ -151,12 +231,16 @@ import androidx.room.*
             focus="Active set in progress.",
             plannedNextLoadValue=null,
             plannedNextLoadUnit=null,
+            plannedNextLoadBasis="UNKNOWN",
+            plannedNextLoadSource="UNKNOWN",
             restStartedAtEpochMs=0L,
         ))
     }
-    @Transaction open fun insertRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>){insertRep(r);if(s.isNotEmpty())insertSignals(s);if(m.isNotEmpty())insertMetrics(m)}
-    @Transaction open fun insertCompletedRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>,o:List<FormObservationEntity>,c:List<CueEventEntity>,responses:List<CueResponseEntity>){
-        insertRepBundle(r,s,m)
+    @Transaction open fun insertRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>,p:List<RepPhaseEvidenceEntity> = emptyList()){
+        insertRep(r);if(s.isNotEmpty())insertSignals(s);if(m.isNotEmpty())insertMetrics(m);if(p.isNotEmpty())insertPhases(p)
+    }
+    @Transaction open fun insertCompletedRepBundle(r:RepEvidenceEntity,s:List<RepSignalEvidenceEntity>,m:List<RepMetricEvidenceEntity>,p:List<RepPhaseEvidenceEntity>,o:List<FormObservationEntity>,c:List<CueEventEntity>,responses:List<CueResponseEntity>){
+        insertRepBundle(r,s,m,p)
         if(o.isNotEmpty())insertObservations(o)
         if(c.isNotEmpty())insertCues(c)
         if(responses.isNotEmpty())insertCueResponses(responses)
