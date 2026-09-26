@@ -3,9 +3,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:usesCleartextTraffic="true">
         <activity android:name=".SimulatorE2EActivity" android:exported="true" />
-            <activity android:name=".ProductionMovementE2EActivity" android:exported="true" />
+        <activity android:name=".ProductionMovementE2EActivity" android:exported="true" />
         <activity android:name=".RuntimeBoundaryE2EActivity" android:exported="true" />
         <activity android:name=".PostMergeIntegrationE2EActivity" android:exported="true" />
         <activity android:name=".Step3ReviewE2EActivity" android:exported="true" />
+        <activity android:name=".Step4WholeWorkflowE2EActivity" android:exported="true" />
     </application>
 </manifest>
