@@ -46,7 +46,7 @@ class CameraGuidanceEngine(
         }
         if(reliable.toDouble()/profile.requiredLandmarks.size<profile.minVisibleRequiredFraction)return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
 
-        val points=target.normalizedLandmarks.values.map{it.position}
+        val points=observations.map{(_,landmark)->landmark.position}
         if(points.size<2)return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
         val minX=points.minOf{it.x};val maxX=points.maxOf{it.x}
         val minY=points.minOf{it.y};val maxY=points.maxOf{it.y}
