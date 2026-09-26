@@ -140,11 +140,12 @@ class HarnessFuzzSafetyContractTest {
         centerY:Double=.5,
     ):PoseSubjectCandidate {
         val span=fill.coerceIn(0.0,1.0)
-        val half=span/2.0
-        val left=.5-half
-        val right=.5+half
-        val top=centerY-half
-        val bottom=centerY+half
+        val horizontalHalf=span/2.0
+        val verticalHalf=minOf(span,.50)/2.0
+        val left=.5-horizontalHalf
+        val right=.5+horizontalHalf
+        val top=centerY-verticalHalf
+        val bottom=centerY+verticalHalf
         val coordinates=listOf(
             left to top,
             right to top,
