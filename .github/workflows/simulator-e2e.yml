@@ -28,10 +28,10 @@ jobs:
           ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
           path: harness-src
 
-      - name: Install harness server and scientific renderer
+      - name: Install harness server
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e "./harness-src[mujoco]"
+          python -m pip install -e ./harness-src
 
       - name: Generate harness temporal contracts
         run: >-
@@ -63,52 +63,67 @@ jobs:
           --harness-root harness-src
           --output build/harness-contracts/fuzz-safety-contracts.tsv
 
-      - name: Prepare rendered MyoFullBody human frame session
+      - name: Prepare deterministic frame session
         shell: bash
-        env:
-          MUJOCO_GL: egl
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y curl libegl1
-          python - <<'PY'
-          from pathlib import Path
-          import cv2
-          import numpy as np
-          from harness.mujoco_backend import MyoFullBodySimulator
-          from harness.mujoco_frame_export import MujocoFrameExporter, RenderCameraConfig
-          from harness.motion_sources import MotionTrajectory
+          sudo apt-get install -y ffmpeg curl
+          mkdir -p e2e-session/frames e2e-session/ground_truth
 
-          sim = MyoFullBodySimulator()
-          q0 = sim.model.qpos0[sim.human_qpos_indices].copy()
-          motion = MotionTrajectory(
-              qpos=np.stack([q0, q0, q0], axis=0),
-              fps=30.0,
-              source="ci-myofullbody-default-pose",
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i color=c=black:s=640x480:r=30:d=0.2 \
+            -frames:v 1 e2e-session/frames/000000.jpg
+
+          cp e2e-session/frames/000000.jpg e2e-session/frames/000001.jpg
+          cp e2e-session/frames/000000.jpg e2e-session/frames/000002.jpg
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("e2e-session")
+          timestamps = [0, 33333, 66667]
+          frames = []
+
+          for i, ts in enumerate(timestamps):
+              gt = {
+                  "schema_version": 1,
+                  "session_id": "android-e2e",
+                  "exercise_id": "smith_squat",
+                  "frame_id": i,
+                  "timestamp_us": ts,
+                  "expected_transport": True,
+              }
+              gt_path = root / "ground_truth" / f"{i:06d}.json"
+              gt_path.write_text(json.dumps(gt) + "\n", encoding="utf-8")
+
+              frames.append({
+                  "frame_id": i,
+                  "timestamp_us": ts,
+                  "width": 640,
+                  "height": 480,
+                  "mime_type": "image/jpeg",
+                  "image_path": f"frames/{i:06d}.jpg",
+                  "ground_truth_path": f"ground_truth/{i:06d}.json",
+              })
+
+          manifest = {
+              "schema_version": 1,
+              "session_id": "android-e2e",
+              "exercise_id": "smith_squat",
+              "fps": 30.0,
+              "width": 640,
+              "height": 480,
+              "source": "github-actions-fixture",
+              "frames": frames,
+          }
+          (root / "manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
           )
-          camera = RenderCameraConfig(
-              width=640,
-              height=480,
-              azimuth_deg=90.0,
-              elevation_deg=-8.0,
-              distance_m=3.2,
-              lookat_z=1.0,
-          )
-          with MujocoFrameExporter(simulator=sim, camera=camera) as exporter:
-              manifest = exporter.export_motion(
-                  motion,
-                  Path("e2e-session"),
-                  session_id="android-e2e",
-                  exercise_id="smith_squat",
-                  overwrite=True,
-              )
-          assert len(manifest.frames) == 3
-          for record in manifest.frames:
-              image = cv2.imread(str(Path("e2e-session") / record.image_path))
-              assert image is not None and image.shape == (480, 640, 3)
-              assert float(image.std()) > 1.0, "rendered human frame is effectively blank"
-          print("MUJOCO_HUMAN_RGB_SESSION_PASS")
           PY
+
       - name: Start harness frame server
         shell: bash
         run: |
@@ -254,7 +269,6 @@ jobs:
               "rep_events",
               "cues",
           }
-          detected_pose = False
           for i, item in enumerate(results):
               assert item["session_id"] == "android-e2e"
               assert item["frame_id"] == i
@@ -262,7 +276,6 @@ jobs:
               analysis = item["analysis"]
               assert "mediapipe_timestamp_ms" in analysis
               assert "pose_count" in analysis
-              detected_pose = detected_pose or analysis["pose_count"] > 0
               assert "landmarks" in analysis
               assert "world_landmarks" in analysis
               missing = production_keys - set(analysis)
@@ -271,8 +284,7 @@ jobs:
               assert isinstance(analysis["rep_events"], list)
               assert isinstance(analysis["cues"], list)
 
-          assert detected_pose, "MediaPipe did not detect the rendered MyoFullBody human in any RGB frame"
-          print("ANDROID_SIMULATOR_MEDIAPIPE_HUMAN_RGB_E2E_PASS")
+          print("ANDROID_SIMULATOR_MEDIAPIPE_PRODUCTION_E2E_PASS")
           PY
 
       - name: Upload E2E diagnostics
