@@ -28,8 +28,8 @@ data class CameraProfile(
     val minVisibleRequiredFraction:Double,
     val maxTrackingGapMs:Long,
     val guidanceActions:Set<CameraGuidanceAction>,
-    val subjectCenterXRange:NumericRange=NumericRange(.32,.68),
-    val subjectCenterYRange:NumericRange=NumericRange(.32,.68),
+    val subjectCenterXRange:NumericRange=NumericRange(0.0,1.0),
+    val subjectCenterYRange:NumericRange=NumericRange(0.0,1.0),
 ):VersionedProfile{
     init{
         requireIdentifier(profileId,"profileId");requireVersion(profileVersion);requireSemanticHash(semanticHash)
