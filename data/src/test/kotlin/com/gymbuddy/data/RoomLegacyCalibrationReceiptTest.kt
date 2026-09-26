@@ -120,10 +120,8 @@ class RoomLegacyCalibrationReceiptTest {
             val form=FormObservation("$id/form",rep.repId,rule.ruleId,rule.ruleVersion,
                 FormObservationState.OK,rule.severity,.95,.12)
             evidence.persistCompletedRepBundle(id,rep,listOf(form),emptyList(),emptyList())
-            val fillRange=c.exerciseProfile.cameraProfile.frameFillRange
             evidence.upsertTrackingSummary(TrackingQualitySummary(id,5,0,0,0,
-                activeObservableFrames=5,observedViewClass=c.preferredViewClass,
-                activeFrameFillMean=(fillRange.min+fillRange.max)/2.0))
+                activeObservableFrames=5,observedViewClass=c.preferredViewClass,activeFrameFillMean=.50))
             evidence.finishSet(SetSummary(id,start+1_900L,1,0,0,epoch+1_900L))
             lifecycle.onCompletedSet(id,c)
         }
