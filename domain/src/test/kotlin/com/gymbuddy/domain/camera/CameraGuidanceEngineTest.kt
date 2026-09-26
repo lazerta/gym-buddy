@@ -135,6 +135,8 @@ class CameraGuidanceEngineTest {
         minVisibleRequiredFraction = .75,
         maxTrackingGapMs = 350,
         guidanceActions = guidance,
+        subjectCenterXRange = NumericRange(.32,.68),
+        subjectCenterYRange = NumericRange(.32,.68),
     )
 
     private fun frame(
