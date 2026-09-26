@@ -87,10 +87,10 @@ class ProductionControlRegressionTest {
         val hipWidth = if (wide) .14 else .03
         fun lm(id: PoseLandmarkId, x: Double, y: Double) = PoseLandmarkObservation(id, PoseCoordinate3d(x, y, 0.0), .95, .95)
         val map = mutableMapOf(
-            PoseLandmarkId.LEFT_SHOULDER to lm(PoseLandmarkId.LEFT_SHOULDER, .5 - shoulderWidth / 2, .3),
-            PoseLandmarkId.RIGHT_SHOULDER to lm(PoseLandmarkId.RIGHT_SHOULDER, .5 + shoulderWidth / 2, .3),
-            PoseLandmarkId.LEFT_HIP to lm(PoseLandmarkId.LEFT_HIP, .5 - hipWidth / 2, .55),
-            PoseLandmarkId.RIGHT_HIP to lm(PoseLandmarkId.RIGHT_HIP, .5 + hipWidth / 2, .55),
+            PoseLandmarkId.LEFT_SHOULDER to lm(PoseLandmarkId.LEFT_SHOULDER, .5 - shoulderWidth / 2, .20),
+            PoseLandmarkId.RIGHT_SHOULDER to lm(PoseLandmarkId.RIGHT_SHOULDER, .5 + shoulderWidth / 2, .20),
+            PoseLandmarkId.LEFT_HIP to lm(PoseLandmarkId.LEFT_HIP, .5 - hipWidth / 2, .80),
+            PoseLandmarkId.RIGHT_HIP to lm(PoseLandmarkId.RIGHT_HIP, .5 + hipWidth / 2, .80),
             PoseLandmarkId.LEFT_ELBOW to lm(PoseLandmarkId.LEFT_ELBOW, .35, .35),
             PoseLandmarkId.RIGHT_ELBOW to lm(PoseLandmarkId.RIGHT_ELBOW, .65, .35),
             PoseLandmarkId.LEFT_WRIST to lm(PoseLandmarkId.LEFT_WRIST, .25, .4),
