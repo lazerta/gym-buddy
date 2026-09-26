@@ -17,6 +17,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 class DefaultWorkoutRuntime(
     context:Context,
@@ -31,13 +32,13 @@ class DefaultWorkoutRuntime(
     private val database=GymBuddyDatabaseFactory.create(context.applicationContext)
     private val dao=database.evidenceDao()
     private val repository=RoomEvidenceRepository(dao)
-    private val flowRepository=RoomWorkoutFlowRepository(dao)
+    private val evidenceSummaryEngine=EvidenceSummaryEngine(CueTextCatalog::text)
+    private val flowRepository=RoomWorkoutFlowRepository(dao,evidenceSummaryEngine)
     private val productRepository=RoomWorkoutProductRepository(dao)
     private val gptAnalysisRepository=RoomGptAnalysisRepository(dao)
     private val calibrationRepository=RoomPersonalCalibrationRepository(dao)
     private val calibrationLifecycle=RoomPersonalCalibrationLifecycle(dao)
     private val configResolver=RuntimeAnalysisConfigResolver(::loadCalibrationSync)
-    private val evidenceSummaryEngine=EvidenceSummaryEngine(CueTextCatalog::text)
     private val chatGptExporter=ChatGptContextExporter(RoomChatGptContextRepository(dao))
     private val ttsFeedback=TextToSpeechCueSink(context.applicationContext){delivery->
         if(!worker.isShutdown){
@@ -56,6 +57,36 @@ class DefaultWorkoutRuntime(
     private var activeConfig:AnalysisConfig?=null
 
     override val analysisExecutor:Executor get()=worker
+
+    private fun command(onCompleted:(Boolean)->Unit,body:()->Unit){
+        try{
+            worker.execute{
+                val success=runCatching{body()}.isSuccess
+                onCompleted(success)
+            }
+        }catch(_:RejectedExecutionException){onCompleted(false)}
+    }
+
+    override fun prepareExercise(request:ExerciseStartRequest,onCompleted:(Boolean)->Unit)=command(onCompleted){
+        check(!worker.isShutdown && currentAnalyzer==null){"Cannot prepare another exercise while active or closed"}
+        val identity=workoutIdentity.snapshot()
+        val previousBundle=bundle
+        val previousRequest=startRequest
+        try{
+            database.runInTransaction{
+                beginExercise(request)
+                beginSet(1,null,null)
+            }
+        }catch(t:Exception){
+            workoutIdentity.restore(identity)
+            bundle=previousBundle;startRequest=previousRequest
+            currentAnalyzer=null;activeSession=null;activeExecution=null;activeSet=null;activeConfig=null
+            throw t
+        }
+    }
+
+    override fun prepareSet(ordinal:Int,actual:LoadSnapshot?,planned:LoadSnapshot?,onCompleted:(Boolean)->Unit)=
+        command(onCompleted){beginSet(ordinal,actual,planned)}
 
     @Synchronized
     override fun beginExercise(exerciseId:String){
@@ -107,6 +138,7 @@ class DefaultWorkoutRuntime(
             plannedExerciseId=execution.plannedExerciseId,
             equipmentContext=context,
         )
+        productRepository.setActiveSession(session.sessionId)
         workoutIdentity.resume(
             sessionId=session.sessionId,
             sessionStartedAtUs=session.startedAtUs,
@@ -115,7 +147,6 @@ class DefaultWorkoutRuntime(
             sessionStartedAtEpochMs=session.startedAtEpochMs,
             executionStartedAtEpochMs=execution.startedAtEpochMs,
         )
-        productRepository.setActiveSession(session.sessionId)
         activeSession=null
         activeExecution=null
         activeSet=null
@@ -286,51 +317,31 @@ class DefaultWorkoutRuntime(
         if(worker.isShutdown){onCompleted(false);return}
         worker.execute{
             val ok=runCatching{
-                productRepository.rememberEquipmentContext(record)
-                productRepository.rememberExerciseSelection(
-                    ExercisePreferenceRecord(
-                        exerciseId=exerciseId,
-                        lastSelectedAtEpochMs=productRepository.loadSelectionSnapshot().preferences
-                            .firstOrNull{it.exerciseId==exerciseId}?.lastSelectedAtEpochMs?:0L,
-                        equipmentContextId=record.contextId,
-                    )
-                )
+                val selected=requireNotNull(InitialExerciseProfiles.resolveByExternalId(exerciseId))
+                require(record.baseEquipmentProfileId==selected.equipment?.profileId){"equipment does not support this exercise"}
+                dao.rememberEquipmentForExercise(exerciseId,record)
             }.isSuccess
             onCompleted(ok)
         }
     }
     override fun markExerciseCompleted(exerciseId:String,completedSets:Int,completedAtEpochMs:Long,onCompleted:(Boolean)->Unit){
         if(worker.isShutdown){onCompleted(false);return}
+        val requestedSessionId=workoutIdentity.sessionId
         worker.execute{
-            val sessionId=workoutIdentity.sessionId?:productRepository.loadSelectionSnapshot().activeSessionId
             val ok=runCatching{
-                requireNotNull(sessionId)
-                productRepository.markExerciseCompleted(
-                    WorkoutExerciseCompletionRecord(sessionId,exerciseId,completedSets,completedAtEpochMs)
-                )
+                val sessionId=requireNotNull(requestedSessionId)
+                dao.completeExerciseFromHistory(sessionId,exerciseId,completedAtEpochMs)
             }.isSuccess
             onCompleted(ok)
         }
     }
-    @Synchronized
-    override fun startNewWorkout(onCompleted:(Boolean)->Unit){
-        if(currentAnalyzer!=null){onCompleted(false);return}
-        workoutIdentity.reset()
-        startRequest=null
-        bundle=null
-        activeSession=null
-        activeExecution=null
-        activeSet=null
-        activeConfig=null
-        if(worker.isShutdown){onCompleted(false);return}
-        worker.execute{
-            val ok=runCatching{
-                // Completion badges are workout-scoped by activeSessionId; retain prior
-                // workout metadata so history/debugging is not destructively rewritten.
-                productRepository.setActiveSession(null)
-                flowRepository.clearRestCheckpoint()
-            }.isSuccess
-            onCompleted(ok)
+    override fun startNewWorkout(onCompleted:(Boolean)->Unit)=command(onCompleted){
+        synchronized(this){
+            check(currentAnalyzer==null){"Cannot abandon an active set"}
+            dao.startNewWorkout()
+            // Only an acknowledged durable transition may replace memory state.
+            workoutIdentity.reset()
+            startRequest=null;bundle=null;activeSession=null;activeExecution=null;activeSet=null;activeConfig=null
         }
     }
 
@@ -338,8 +349,14 @@ class DefaultWorkoutRuntime(
         if(worker.isShutdown){onCompleted(false);return}
         worker.execute{
             val result=runCatching{
-                val selected=InitialExerciseProfiles.resolveByExternalId(exerciseId)
+                val registered=InitialExerciseProfiles.resolveByExternalId(exerciseId)
                     ?:error("Unsupported exercise_id: $exerciseId")
+                val selected=bundle?.takeIf{it.definition.exerciseId==registered.definition.exerciseId}?:run{
+                    val snapshot=productRepository.loadSelectionSnapshot()
+                    val contextId=snapshot.preferences.firstOrNull{it.exerciseId==registered.definition.exerciseId}?.equipmentContextId
+                    val context=snapshot.equipmentContexts.firstOrNull{it.contextId==contextId}
+                    registered.copy(equipment=context?.let{it.specialize(requireNotNull(registered.equipment))}?:registered.equipment)
+                }
                 val generic=AnalysisConfigResolver.resolve(selected.definition,selected.profile,selected.equipment)
                 calibrationLifecycle.resetTarget(generic)
             }.getOrDefault(false)
@@ -359,7 +376,8 @@ class DefaultWorkoutRuntime(
     }
     override fun appendGptAnalysis(record:GptAnalysisRecord,onCompleted:(Boolean)->Unit){
         if(worker.isShutdown){onCompleted(false);return}
-        worker.execute{onCompleted(runCatching{gptAnalysisRepository.append(record)}.isSuccess)}
+        val snapshot=record.copy(sourceSetIds=record.sourceSetIds.toSet(),recommendations=record.recommendations.toList())
+        worker.execute{onCompleted(runCatching{gptAnalysisRepository.append(snapshot)}.isSuccess)}
     }
     override fun loadGptAnalyses(setId:String,onLoaded:(List<GptAnalysisRecord>)->Unit){
         if(worker.isShutdown){onLoaded(emptyList());return}

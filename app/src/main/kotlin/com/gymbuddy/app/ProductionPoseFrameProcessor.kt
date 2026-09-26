@@ -70,6 +70,7 @@ class ProductionPoseFrameProcessor(
         val responses:List<CueResponse>,
     )
     private val pendingReps=java.util.ArrayDeque<PendingRepBundle>()
+    private val pendingAttempts=java.util.ArrayDeque<com.gymbuddy.domain.evidence.InvalidAttemptEvidence>()
 
     init{if(repository!=null)require(session!=null&&execution!=null&&set!=null)}
 
@@ -119,13 +120,9 @@ class ProductionPoseFrameProcessor(
             }
         }
 
-        if(result.movement.invalidAttempts.isNotEmpty()){
-            ensureSetOpened()
-            val setId=set?.setId
-            if(repository!=null&&setId!=null){
-                result.movement.invalidAttempts.forEach{repository.persistInvalidAttempt(setId,it)}
-            }
-        }
+        // Queue all frame output before any transaction can fail. A retry must
+        // keep the original attempt IDs, just like completed-rep bundles.
+        pendingAttempts.addAll(result.movement.invalidAttempts)
 
         result.movement.repEvidence.forEach{rep->
             val forms=result.movement.formObservations.filter{it.repId==rep.repId}
@@ -168,8 +165,14 @@ class ProductionPoseFrameProcessor(
     }
 
     private fun flushPendingReps(deliverFeedback:Boolean=false){
-        if(activeStarted||pendingReps.isNotEmpty())ensureSetOpened()
+        if(activeStarted||pendingReps.isNotEmpty()||pendingAttempts.isNotEmpty())ensureSetOpened()
         var committed=false
+        while(pendingAttempts.isNotEmpty()){
+            val attempt=pendingAttempts.first
+            if(repository!=null&&set!=null)repository.persistInvalidAttempt(set.setId,attempt)
+            pendingAttempts.removeFirst()
+            committed=true
+        }
         while(pendingReps.isNotEmpty()){
             val bundle=pendingReps.first
             val setId=set?.setId

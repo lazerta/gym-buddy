@@ -83,6 +83,7 @@ class RoomStep3ProductRepositoryTest {
         repo.ensureSession(WorkoutSessionRecord("gpt-session",1,1_000))
         repo.ensureExecution(ExerciseExecutionRecord("gpt-exec","gpt-session",b.definition.exerciseId,2,1_001))
         repo.openSet(SetRecord("gpt-set","gpt-exec",1,3,null,1_002),config)
+        repo.finishSet(SetSummary("gpt-set",4,0,0,0,1_003))
         return requireNotNull(repo.loadSet("gpt-set"))
     }
 

@@ -82,15 +82,14 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
 
     override fun persistInvalidAttempt(setId:String,attempt:InvalidAttemptEvidence){
         requireNotNull(dao.set(setId))
-        val inserted=dao.insertInvalidAttempt(
-            InvalidAttemptEvidenceEntity(
-                attempt.attemptId,setId,attempt.stepId,attempt.primitive.name,
-                attempt.startedAtUs,attempt.endedAtUs,attempt.reason.name,attempt.minConfidence,
-            )
+        val entity=InvalidAttemptEvidenceEntity(
+            attempt.attemptId,setId,attempt.stepId,attempt.primitive.name,
+            attempt.startedAtUs,attempt.endedAtUs,attempt.reason.name,attempt.minConfidence,
         )
+        val inserted=dao.insertInvalidAttempt(entity)
         if(inserted==-1L){
             val existing=dao.invalidAttemptsForSet(setId).singleOrNull{it.attemptId==attempt.attemptId}
-            require(existing!=null&&existing.reason==attempt.reason.name&&existing.startedAtUs==attempt.startedAtUs&&existing.endedAtUs==attempt.endedAtUs){
+            require(existing==entity){
                 "persisted invalid attempt is immutable"
             }
         }

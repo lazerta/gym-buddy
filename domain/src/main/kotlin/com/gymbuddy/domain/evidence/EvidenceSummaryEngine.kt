@@ -1,5 +1,7 @@
 package com.gymbuddy.domain.evidence
 
+import com.gymbuddy.domain.coaching.CueResponseState
+import com.gymbuddy.domain.movement.RepClassification
 import com.gymbuddy.domain.persistence.CueDeliveryState
 import com.gymbuddy.domain.persistence.PersistedSetEvidence
 import com.gymbuddy.domain.profile.FormRuleSeverity
@@ -12,39 +14,40 @@ data class SetCoachingSummary(
     val unknownObservationCount:Int=0,
 )
 
-class EvidenceSummaryEngine(
-    private val ruleText:(String)->String={it},
-){
+class EvidenceSummaryEngine(private val ruleText:(String)->String={it}){
     fun summarize(evidence:PersistedSetEvidence):SetCoachingSummary{
-        val deliveredCueIds=evidence.cueDeliveries
-            .filter{it.state==CueDeliveryState.COMPLETED}
-            .map{it.cueId}.toSet()
-        val deliveredRules=evidence.cues
-            .filter{it.cueId in deliveredCueIds}
-            .map{it.ruleId}
-            .distinct()
-        val deviations=evidence.observations.filter{
-            it.state==FormObservationState.DEVIATION&&
-                (it.confidence?:0.0)>=.60
+        val validReps=evidence.reps.filter{it.classification==RepClassification.NORMAL}.associateBy{it.repId}
+        val deliveredIds=evidence.cueDeliveries.filter{it.state==CueDeliveryState.COMPLETED}.map{it.cueId}.toSet()
+        val delivered=evidence.cues.filter{it.cueId in deliveredIds&&it.repId in validReps}
+            .sortedWith(compareBy({it.emittedAtUs},{it.cueId}))
+        val assessed=evidence.observations.filter{
+            it.repId in validReps&&it.state!=FormObservationState.UNKNOWN&&(it.confidence?:0.0)>=.60
         }
-        val byRule=deviations.groupBy{it.ruleId}
-        val recurring=byRule.entries
-            .filter{it.value.size>=2}
-            .sortedWith(compareByDescending<Map.Entry<String,List<FormObservation>>>{entries->
-                entries.value.maxOfOrNull{severityWeight(it.severity)}?:0
-            }.thenByDescending{it.value.size}.thenBy{it.key})
+        val tracking=evidence.tracking
+        val activeFrames=tracking?.let{it.activeObservableFrames+it.activeDegradedFrames+it.activePausedFrames+it.activeUnknownFrames}?:0
+        val unreliable=tracking!=null&&(tracking.interruptionEpisodes>0||tracking.cameraDisturbanceEpisodes>0||
+            tracking.activePausedFrames>0||tracking.activeUnknownFrames>0||
+            (activeFrames>0&&tracking.activeDegradedFrames.toDouble()/activeFrames>.20))
+        val byRule=assessed.filter{it.state==FormObservationState.DEVIATION}.groupBy{it.ruleId}
+        val resolved=delivered.filter{cue->
+            evidence.responses.any{response->
+                val rep=validReps[response.repId]
+                response.cueId==cue.cueId&&response.state==CueResponseState.IMPROVED&&
+                    rep!=null&&rep.completedAtUs>cue.emittedAtUs&&
+                    assessed.any{it.repId==response.repId&&it.ruleId==cue.ruleId&&it.state==FormObservationState.OK}&&
+                    byRule[cue.ruleId].orEmpty().none{validReps.getValue(it.repId).ordinal>=rep.ordinal}
+            }
+        }.map{it.ruleId}.toSet()
+        val recurring=if(unreliable||evidence.summary==null)emptyList() else byRule.entries
+            .filter{it.key !in resolved&&it.value.map{row->row.repId}.distinct().size>=2}
+            .sortedWith(compareByDescending<Map.Entry<String,List<FormObservation>>>{entry->
+                entry.value.maxOf{severityWeight(it.severity)}
+            }.thenByDescending{it.value.map{row->row.repId}.distinct().size}.thenBy{it.key})
             .map{it.key}
-        val focusRule=recurring.firstOrNull()
-            ?:deliveredRules.lastOrNull()
-        return SetCoachingSummary(
-            focusRuleId=focusRule,
-            focusText=focusRule?.let(ruleText)?:"Repeat the same setup.",
-            recurringRuleIds=recurring,
-            deliveredCueRuleIds=deliveredRules,
-            unknownObservationCount=evidence.observations.count{it.state==FormObservationState.UNKNOWN},
-        )
+        val focus=recurring.firstOrNull()
+        return SetCoachingSummary(focus,focus?.let(ruleText)?:"Repeat the same setup.",recurring,
+            delivered.map{it.ruleId}.distinct(),evidence.observations.count{it.state==FormObservationState.UNKNOWN})
     }
-
     private fun severityWeight(severity:FormRuleSeverity)=when(severity){
         FormRuleSeverity.MAJOR->3
         FormRuleSeverity.MINOR->2

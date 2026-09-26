@@ -42,6 +42,7 @@ sealed interface WorkoutUiState {
         val substitutionForExerciseId:String?=null,
         val equipmentEditorExerciseId:String?=null,
         val equipmentLabelInput:String="",
+        val errorMessage:String?=null,
     ):WorkoutUiState
 
     data class CameraSetup(
@@ -75,6 +76,8 @@ sealed interface WorkoutUiState {
         val plannedNextLoadUnit:String?=null,
         val plannedNextLoadBasis:LoadBasis=LoadBasis.UNKNOWN,
         val plannedNextLoadSource:LoadSource=LoadSource.PLANNED,
+        val errorMessage:String?=null,
+        val busy:Boolean=false,
     ):WorkoutUiState
 
     data class Summary(

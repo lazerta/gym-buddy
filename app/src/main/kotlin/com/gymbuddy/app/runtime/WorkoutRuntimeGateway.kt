@@ -37,6 +37,14 @@ interface WorkoutRuntimeGateway:AutoCloseable {
     fun beginSet(setOrdinal:Int,actualLoad:LoadSnapshot?=null)
     fun beginSet(setOrdinal:Int,actualLoad:LoadSnapshot?,plannedLoad:LoadSnapshot?){beginSet(setOrdinal,actualLoad)}
 
+    fun prepareExercise(request:ExerciseStartRequest,onCompleted:(Boolean)->Unit){
+        val success=runCatching{beginExercise(request);beginSet(1,null,null)}.isSuccess
+        onCompleted(success)
+    }
+    fun prepareSet(ordinal:Int,actual:LoadSnapshot?,planned:LoadSnapshot?,onCompleted:(Boolean)->Unit){
+        val success=runCatching{beginSet(ordinal,actual,planned)}.isSuccess
+        onCompleted(success)
+    }
     fun endSet(onCompleted:(CompletedSetContext?)->Unit)
     fun frameConsumer(listener:(WorkoutRuntimeSnapshot)->Unit):FrameConsumer<MPImage>
 

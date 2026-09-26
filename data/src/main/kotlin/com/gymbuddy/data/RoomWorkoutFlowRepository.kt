@@ -1,5 +1,6 @@
 package com.gymbuddy.data
 
+import com.gymbuddy.domain.evidence.EvidenceSummaryEngine
 import com.gymbuddy.domain.persistence.ActiveSetRecovery
 import com.gymbuddy.domain.persistence.CompletedSetRecord
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
@@ -14,6 +15,7 @@ import com.gymbuddy.domain.persistence.WorkoutSessionRecord
 
 class RoomWorkoutFlowRepository(
     private val dao:EvidenceDao,
+    private val summaryEngine:EvidenceSummaryEngine?=null,
 ):WorkoutFlowRepository{
     override fun saveActiveSetCheckpoint(setId:String){
         requireNotNull(dao.set(setId))
@@ -72,14 +74,14 @@ class RoomWorkoutFlowRepository(
             ),
             completedSet=set.toRecord(),
             previousReps=summary.completedReps,
-            focus=state.focus,
+            focus=focusForSet(set.setId)?:state.focus,
             plannedNextLoad=loadSnapshot(
                 state.plannedNextLoadValue,state.plannedNextLoadUnit,
                 state.plannedNextLoadBasis,state.plannedNextLoadSource,
             ),
             restStartedAtEpochMs=state.restStartedAtEpochMs,
             completedSets=completedHistory(execution,set.setOrdinal).map { result ->
-                if(result.set.setId==set.setId)result.copy(focus=state.focus) else result
+                if(result.set.setId==set.setId)result.copy(focus=focusForSet(set.setId)?:state.focus) else result
             },
         )
     }
@@ -141,8 +143,14 @@ class RoomWorkoutFlowRepository(
         .sortedBy { it.setOrdinal }
         .map { set ->
             val summary=requireNotNull(dao.setSummary(set.setId))
-            CompletedSetRecord(set.toRecord(),summary.completedReps)
+            CompletedSetRecord(set.toRecord(),summary.completedReps,focusForSet(set.setId)?:"Repeat the same setup.")
         }
+
+    private fun focusForSet(id:String):String?{
+        val engine=summaryEngine?:return null
+        val evidence=RoomEvidenceRepository(dao).loadSet(id)?:return null
+        return engine.summarize(evidence).focusText
+    }
 
     private fun SetEntity.toRecord()=SetRecord(
         setId,

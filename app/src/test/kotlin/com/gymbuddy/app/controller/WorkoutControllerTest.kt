@@ -428,6 +428,9 @@ class WorkoutControllerTest {
             markedInterrupted=Triple(setId,recoveredAtEpochMs,committedReps)
         }
 
+        override fun markExerciseCompleted(exerciseId:String,completedSets:Int,completedAtEpochMs:Long,onCompleted:(Boolean)->Unit){
+            clearRestCheckpoint();onCompleted(true)
+        }
         override fun clearRestCheckpoint(){clearedRest++}
 
         override fun resetPersonalCalibration(

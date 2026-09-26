@@ -9,19 +9,21 @@ class RoomGptAnalysisRepository(
     private val dao:EvidenceDao,
 ):GptAnalysisRepository{
     override fun append(record:GptAnalysisRecord){
-        record.sourceSetIds.forEach{id->requireNotNull(dao.set(id)){"missing GPT analysis source set: $id"}}
-        require(dao.set(record.setId)!=null)
-        dao.insertGptAnalysis(
+        val sources=record.sourceSetIds.sorted()
+        val recommendations=record.recommendations.toList()
+        require(sources.isNotEmpty()&&record.setId in sources&&sources.none{it.isBlank()})
+        require(recommendations.none{it.isBlank()})
+        dao.appendAnalysis(
             GptAnalysisEntity(
                 analysisId=record.analysisId,
                 setId=record.setId,
                 schemaVersion=record.schemaVersion,
                 modelLabel=record.modelLabel,
                 createdAtEpochMs=record.createdAtEpochMs,
-                sourceSetIdsPayload=encode(record.sourceSetIds.sorted()),
+                sourceSetIdsPayload=encode(sources),
                 summary=record.summary,
-                recommendationsPayload=encode(record.recommendations),
-            )
+                recommendationsPayload=encode(recommendations),
+            ),sources
         )
     }
 

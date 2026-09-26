@@ -1,6 +1,8 @@
 package com.gymbuddy.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
@@ -25,13 +27,14 @@ fun ExerciseSelectionScreen(
     onStartNewWorkout:()->Unit={},
 ){
     Column(
-        modifier=Modifier.fillMaxSize().padding(20.dp),
+        modifier=Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement=Arrangement.spacedBy(12.dp),
     ){
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Text("Gym Buddy",style=MaterialTheme.typography.h4)
             TextButton(onClick=onStartNewWorkout){Text("New workout")}
         }
+        state.errorMessage?.let{Text(it,color=MaterialTheme.colors.error)}
         TabRow(selectedTabIndex=WorkoutDay.entries.indexOf(state.selectedDay)){
             WorkoutDay.entries.forEach{day->
                 Tab(selected=day==state.selectedDay,onClick={onSelectDay(day)},text={Text(day.label)})

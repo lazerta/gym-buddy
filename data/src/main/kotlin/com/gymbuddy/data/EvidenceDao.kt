@@ -1,5 +1,6 @@
 package com.gymbuddy.data
 import androidx.room.*
+import com.gymbuddy.domain.persistence.*
 
 @Dao abstract class EvidenceDao {
     @Insert(onConflict=OnConflictStrategy.IGNORE) abstract fun insertSession(e:WorkoutSessionEntity):Long
@@ -154,6 +155,71 @@ import androidx.room.*
     @Query("DELETE FROM workout_exercise_completions WHERE sessionId=:sessionId") abstract fun deleteWorkoutCompletions(sessionId:String)
     @Query("SELECT * FROM workout_product_state WHERE slotId=:slotId") abstract fun workoutProductState(slotId:String):WorkoutProductStateEntity?
     @Query("SELECT * FROM gpt_analyses WHERE setId=:setId ORDER BY createdAtEpochMs, analysisId") abstract fun gptAnalysesForSet(setId:String):List<GptAnalysisEntity>
+
+    @Query("SELECT * FROM gpt_analyses WHERE analysisId=:id") abstract fun gptAnalysis(id:String):GptAnalysisEntity?
+
+    @Transaction open fun readProductSnapshot():WorkoutSelectionSnapshot{
+        val active=workoutProductState("active")?.activeSessionId
+        return WorkoutSelectionSnapshot(active,
+            exercisePreferences().map{ExercisePreferenceRecord(it.exerciseId,it.favorite,it.lastSelectedAtEpochMs,it.equipmentContextId)},
+            active?.let(::workoutCompletions).orEmpty().map{WorkoutExerciseCompletionRecord(it.sessionId,it.exerciseId,it.completedSets,it.completedAtEpochMs)},
+            equipmentContexts().map{EquipmentContextRecord(it.contextId,it.baseEquipmentProfileId,it.label,it.updatedAtEpochMs)})
+    }
+
+    @Transaction open fun rememberSelection(record:ExercisePreferenceRecord){
+        val current=exercisePreferences().firstOrNull{it.exerciseId==record.exerciseId}
+        upsertExercisePreference(ExercisePreferenceEntity(record.exerciseId,current?.favorite?:record.favorite,
+            maxOf(current?.lastSelectedAtEpochMs?:0,record.lastSelectedAtEpochMs),
+            record.equipmentContextId?:current?.equipmentContextId))
+    }
+
+    @Transaction open fun changeFavorite(id:String,favorite:Boolean){
+        require(id.isNotBlank())
+        val current=exercisePreferences().firstOrNull{it.exerciseId==id}
+        upsertExercisePreference(ExercisePreferenceEntity(id,favorite,current?.lastSelectedAtEpochMs?:0,current?.equipmentContextId))
+    }
+
+    @Transaction open fun rememberEquipmentForExercise(id:String,record:EquipmentContextRecord){
+        require(id.isNotBlank())
+        val existing=equipmentContexts().firstOrNull{it.contextId==record.contextId}
+        require(existing==null||existing.baseEquipmentProfileId==record.baseEquipmentProfileId){"equipment identity cannot change base profile"}
+        upsertEquipmentContext(EquipmentContextEntity(record.contextId,record.baseEquipmentProfileId,record.label,record.updatedAtEpochMs))
+        rememberSelection(ExercisePreferenceRecord(id,equipmentContextId=record.contextId))
+    }
+
+    @Transaction open fun startNewWorkout(){
+        // Roll back the active-session slot too if clearing recovery fails.
+        upsertWorkoutProductState(WorkoutProductStateEntity("active",null))
+        deleteWorkoutFlowState("active")
+    }
+
+    @Transaction open fun completeExerciseFromHistory(sessionId:String,exerciseId:String,epochMs:Long){
+        requireNotNull(session(sessionId))
+        val count=completedSetIdsForSessionExercise(sessionId,exerciseId).size
+        require(count>0){"exercise has no completed sets"}
+        val previous=workoutCompletions(sessionId).firstOrNull{it.exerciseId==exerciseId}
+        upsertWorkoutExerciseCompletion(WorkoutExerciseCompletionEntity(sessionId,exerciseId,count,
+            maxOf(previous?.completedAtEpochMs?:0,epochMs)))
+        val checkpoint=workoutFlowState("active")
+        val checkpointExecution=checkpoint?.let{set(it.completedSetId)}?.let{execution(it.executionId)}
+        if(checkpointExecution?.sessionId==sessionId && checkpointExecution.exerciseId==exerciseId){
+            deleteWorkoutFlowState("active")
+        }
+    }
+
+    @Transaction open fun appendAnalysis(record:GptAnalysisEntity,sourceIds:List<String>){
+        require(record.setId in sourceIds)
+        sourceIds.forEach{id->
+            requireNotNull(set(id)){"missing GPT analysis source set: $id"}
+            requireNotNull(setSummary(id)){"GPT analysis source must be completed: $id"}
+        }
+        val existing=gptAnalysis(record.analysisId)
+        if(existing!=null){
+            require(existing==record){"published GPT analysis is immutable"}
+            return // retry of the same immutable publication, not a second analysis
+        }
+        insertGptAnalysis(record)
+    }
 
     @Transaction open fun insertSetWithContext(s:SetEntity,c:AnalysisContextEntity){
         insertSet(s)

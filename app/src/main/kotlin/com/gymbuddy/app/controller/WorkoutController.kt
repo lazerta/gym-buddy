@@ -41,6 +41,16 @@ class WorkoutController(
     private var recoveryPending=true
     private var selectionSnapshot=WorkoutSelectionSnapshot()
     private var priorWorkoutCompletedSets=0
+    private var uiGeneration=0L
+    private var selectionRequest=0L
+    private var closed=false
+    private var preparing=false
+    private var selectionLoaded=false
+    private var deferredRecovery:(()->Unit)?=null
+    private val favoriteWrites=mutableSetOf<String>()
+    private var equipmentWritePending=false
+    private var equipmentEditGeneration=0L
+    private var selectionError:String?=null
 
     private var otherExerciseOpen=false
     private var searchQuery=""
@@ -56,7 +66,7 @@ class WorkoutController(
     val uiState:StateFlow<WorkoutUiState> = _uiState.asStateFlow()
 
     init{
-        runtime.loadWorkoutSelection(::onSelectionSnapshotLoaded)
+        refreshSelection()
         runtime.loadRestCheckpoint(::onRestCheckpointLoaded)
     }
 
@@ -65,7 +75,7 @@ class WorkoutController(
 
     @Synchronized
     fun selectDay(day:WorkoutDay){
-        if(recoveryPending)return
+        if(recoveryPending||preparing||closed)return
         selectedDay=day
         if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
     }
@@ -77,7 +87,7 @@ class WorkoutController(
 
     @Synchronized
     fun beginSubstitution(plannedExerciseId:String){
-        if(recoveryPending)return
+        if(recoveryPending||preparing||closed)return
         requireNotNull(InitialExerciseProfiles.resolveByExternalId(plannedExerciseId))
         otherExerciseOpen=true
         substitutionForExerciseId=plannedExerciseId
@@ -87,7 +97,7 @@ class WorkoutController(
 
     @Synchronized
     fun openOtherExercise(){
-        if(recoveryPending)return
+        if(recoveryPending||preparing||closed)return
         otherExerciseOpen=true
         substitutionForExerciseId=null
         searchQuery=""
@@ -117,25 +127,32 @@ class WorkoutController(
 
     @Synchronized
     fun toggleFavorite(exerciseId:String){
-        val current=selectionSnapshot.preferences.firstOrNull{it.exerciseId==exerciseId}
-        val next=!(current?.favorite?:false)
-        selectionSnapshot=selectionSnapshot.copy(
-            preferences=selectionSnapshot.preferences.filterNot{it.exerciseId==exerciseId}+
-                ExercisePreferenceRecord(
-                    exerciseId=exerciseId,
-                    favorite=next,
-                    lastSelectedAtEpochMs=current?.lastSelectedAtEpochMs?:0L,
-                    equipmentContextId=current?.equipmentContextId,
-                )
-        )
-        runtime.setExerciseFavorite(exerciseId,next)
-        if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
+        if(recoveryPending||closed||!favoriteWrites.add(exerciseId))return
+        val next=!(selectionSnapshot.preferences.firstOrNull{it.exerciseId==exerciseId}?.favorite?:false)
+        selectionRequest++ // invalidate reads begun before this write
+        runtime.setExerciseFavorite(exerciseId,next){success->
+            synchronized(this){
+                favoriteWrites.remove(exerciseId)
+                selectionRequest++
+                if(closed)return@synchronized
+                if(success){
+                    val current=selectionSnapshot.preferences.firstOrNull{it.exerciseId==exerciseId}
+                        ?:ExercisePreferenceRecord(exerciseId)
+                    selectionSnapshot=selectionSnapshot.copy(preferences=
+                        selectionSnapshot.preferences.filterNot{it.exerciseId==exerciseId}+current.copy(favorite=next))
+                }
+                selectionError=if(success)null else "Favorite was not saved. Try again."
+                if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
+            }
+        }
     }
 
     @Synchronized
     fun editEquipment(exerciseId:String){
         val bundle=InitialExerciseProfiles.resolveByExternalId(exerciseId)?:return
         if(bundle.equipment==null)return
+        if(recoveryPending||preparing||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
+        equipmentEditGeneration++
         equipmentEditorExerciseId=exerciseId
         equipmentLabelInput=currentEquipmentContext(exerciseId)?.label.orEmpty()
         _uiState.value=selectionState()
@@ -149,6 +166,7 @@ class WorkoutController(
 
     @Synchronized
     fun saveEquipmentContext(){
+        if(equipmentWritePending||closed)return
         val exerciseId=equipmentEditorExerciseId?:return
         val label=equipmentLabelInput.trim()
         if(label.isEmpty())return
@@ -162,29 +180,46 @@ class WorkoutController(
             label=label,
             updatedAtEpochMs=clock.nowEpochMs(),
         )
-        pendingEquipmentContexts[exerciseId]=context
-        selectionSnapshot=selectionSnapshot.copy(
-            equipmentContexts=(selectionSnapshot.equipmentContexts.filterNot{it.contextId==context.contextId}+context),
-            preferences=selectionSnapshot.preferences.filterNot{it.exerciseId==exerciseId}+
-                ExercisePreferenceRecord(
-                    exerciseId=exerciseId,
-                    favorite=selectionSnapshot.preferences.firstOrNull{it.exerciseId==exerciseId}?.favorite?:false,
-                    lastSelectedAtEpochMs=selectionSnapshot.preferences.firstOrNull{it.exerciseId==exerciseId}?.lastSelectedAtEpochMs?:0L,
-                    equipmentContextId=context.contextId,
-                )
-        )
-        runtime.rememberEquipmentContext(exerciseId,context)
-        equipmentEditorExerciseId=null
-        equipmentLabelInput=""
-        _uiState.value=selectionState()
+        equipmentWritePending=true
+        val edit=equipmentEditGeneration
+        selectionRequest++
+        runtime.rememberEquipmentContext(exerciseId,context){success->
+            synchronized(this){
+                equipmentWritePending=false
+                selectionRequest++
+                if(closed)return@synchronized
+                if(success){
+                    pendingEquipmentContexts[exerciseId]=context
+                    val current=selectionSnapshot.preferences.firstOrNull{it.exerciseId==exerciseId}
+                        ?:ExercisePreferenceRecord(exerciseId)
+                    selectionSnapshot=selectionSnapshot.copy(
+                        equipmentContexts=selectionSnapshot.equipmentContexts.filterNot{it.contextId==context.contextId}+context,
+                        preferences=selectionSnapshot.preferences.filterNot{it.exerciseId==exerciseId}+
+                            current.copy(equipmentContextId=context.contextId))
+                    if(edit==equipmentEditGeneration){equipmentEditorExerciseId=null;equipmentLabelInput=""}
+                }
+                selectionError=if(success)null else "Equipment was not saved. Try again."
+                if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
+            }
+        }
     }
 
     @Synchronized
     fun startNewWorkout(){
-        if(_uiState.value !is WorkoutUiState.ExerciseSelection)return
+        if(recoveryPending||preparing||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
+        preparing=true
+        val generation=++uiGeneration
+        selectionRequest++
         runtime.startNewWorkout{success->
+            synchronized(this){
+                if(closed||uiGeneration!=generation)return@synchronized
+                preparing=false
+                selectionError=if(success)null else "New workout was not saved. Try again."
+                if(!success)_uiState.value=selectionState()
+            }
             if(success){
                 synchronized(this){
+                    if(closed||uiGeneration!=generation)return@synchronized
                     selectionSnapshot=selectionSnapshot.copy(activeSessionId=null,completions=emptyList())
                     pendingEquipmentContexts.clear()
                     _uiState.value=selectionState()
@@ -195,7 +230,7 @@ class WorkoutController(
 
     @Synchronized
     private fun selectExerciseInternal(exerciseId:String,plannedExerciseId:String?){
-        if(recoveryPending)return
+        if(recoveryPending||preparing||closed||_uiState.value !is WorkoutUiState.ExerciseSelection)return
         val bundle=InitialExerciseProfiles.resolveByExternalId(exerciseId)
             ?:error("Unsupported exercise_id: $exerciseId")
         val actualId=bundle.definition.exerciseId
@@ -217,15 +252,27 @@ class WorkoutController(
         otherExerciseOpen=false
         substitutionForExerciseId=null
         searchQuery=""
-        runtime.beginExercise(request)
-        runtime.beginSet(setNumber,actualLoad,plannedLoad)
-        _uiState.value=WorkoutUiState.CameraSetup(
+        preparing=true
+        val generation=++uiGeneration
+        runtime.prepareExercise(request){success->
+            synchronized(this){
+                if(closed||generation!=uiGeneration)return@synchronized
+                preparing=false
+                if(!success){
+                    selectedExerciseId=null
+                    selectionError="Exercise setup failed. Try again."
+                    _uiState.value=selectionState()
+                    return@synchronized
+                }
+                _uiState.value=WorkoutUiState.CameraSetup(
             exerciseId=actualId,
             exerciseName=bundle.definition.displayName,
             instruction=initialCameraInstruction(bundle.profile.cameraProfile.preferredViewClass.name),
             readiness=CameraReadinessUi.SETTING_UP,
             setNumber=setNumber,
-        )
+                )
+            }
+        }
     }
 
     @Synchronized
@@ -294,6 +341,7 @@ class WorkoutController(
 
     @Synchronized
     fun updateNextLoad(value:String){
+        if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
         if(value.isNotEmpty()){
             val parsed=value.toDoubleOrNull()?:return
@@ -309,6 +357,7 @@ class WorkoutController(
 
     @Synchronized
     fun updateNextLoadUnit(value:String){
+        if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
         val unit=value.trim().takeIf{it.isNotEmpty()}
         plannedLoad=parseLoad(current.plannedNextLoadText,unit,current.plannedNextLoadBasis,LoadSource.PLANNED)
@@ -319,6 +368,7 @@ class WorkoutController(
 
     @Synchronized
     fun updateNextLoadBasis(value:LoadBasis){
+        if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
         plannedLoad=parseLoad(current.plannedNextLoadText,current.plannedNextLoadUnit,value,LoadSource.PLANNED)
         _uiState.value=current.copy(plannedNextLoadBasis=value)
@@ -328,53 +378,71 @@ class WorkoutController(
 
     @Synchronized
     fun nextSet(){
+        if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
-        setNumber=current.completedSetNumber+1
-        plannedLoad=parseLoad(
-            current.plannedNextLoadText,current.plannedNextLoadUnit,current.plannedNextLoadBasis,LoadSource.PLANNED
-        )
-        actualLoad=plannedLoad?.copy(source=LoadSource.USER_ENTERED)
-        currentRepCount=0
-        latestCue=null
-        endingSet=false
-        restCheckpoint=null
-        runtime.beginSet(setNumber,actualLoad,plannedLoad)
-        _uiState.value=WorkoutUiState.CameraSetup(
-            exerciseId=current.exerciseId,
-            exerciseName=current.exerciseName,
-            instruction="Recheck the phone position.",
-            readiness=CameraReadinessUi.SETTING_UP,
-            setNumber=setNumber,
-        )
+        val ordinal=current.completedSetNumber+1
+        val nextPlan=parseLoad(current.plannedNextLoadText,current.plannedNextLoadUnit,
+            current.plannedNextLoadBasis,LoadSource.PLANNED)
+        val nextActual=nextPlan?.copy(source=LoadSource.USER_ENTERED)
+        preparing=true
+        _uiState.value=current.copy(busy=true,errorMessage=null)
+        val generation=++uiGeneration
+        runtime.prepareSet(ordinal,nextActual,nextPlan){success->
+            synchronized(this){
+                if(closed||generation!=uiGeneration)return@synchronized
+                preparing=false
+                if(!success){
+                    _uiState.value=current.copy(errorMessage="Next set could not be prepared. Try again.")
+                    return@synchronized
+                }
+                setNumber=ordinal;plannedLoad=nextPlan;actualLoad=nextActual
+                currentRepCount=0;latestCue=null;endingSet=false;restCheckpoint=null
+                _uiState.value=WorkoutUiState.CameraSetup(
+                    exerciseId=current.exerciseId,exerciseName=current.exerciseName,
+                    instruction="Recheck the phone position.",readiness=CameraReadinessUi.SETTING_UP,
+                    setNumber=ordinal,
+                )
+            }
+        }
     }
 
     @Synchronized
     fun finishExercise(){
+        if(preparing||closed)return
         val current=_uiState.value as? WorkoutUiState.Rest?:return
-        val recurring=completedSets.map{it.focus}
-            .filter{it!="Repeat the same setup."}
-            .groupingBy{it}.eachCount().entries
-            .sortedWith(compareByDescending<Map.Entry<String,Int>>{it.value}.thenBy{it.key})
-            .map{it.key}
-        val usefulFocus=recurring.firstOrNull()?:current.focus
-        restCheckpoint=null
-        runtime.clearRestCheckpoint()
+        preparing=true
+        _uiState.value=current.copy(busy=true,errorMessage=null)
+        val generation=uiGeneration
         val totalCompleted=priorWorkoutCompletedSets+completedSets.size
-        runtime.markExerciseCompleted(current.exerciseId,totalCompleted,clock.nowEpochMs()){
-            runtime.loadWorkoutSelection(::onSelectionSnapshotLoaded)
-        }
-        _uiState.value=WorkoutUiState.Summary(
-            exerciseId=current.exerciseId,
-            exerciseName=current.exerciseName,
-            completedSets=completedSets.toList(),
-            evidenceSummary=usefulFocus,
-            recurringEvidence=recurring,
-        )
-        lastCompletedSetId?.let{setId->
-            runtime.loadGptAnalyses(setId){records->
-                synchronized(this){
-                    val summary=_uiState.value as? WorkoutUiState.Summary?:return@synchronized
-                    _uiState.value=summary.copy(savedAnalyses=records.map(::analysisUi))
+        runtime.markExerciseCompleted(current.exerciseId,totalCompleted,clock.nowEpochMs()){success->
+            synchronized(this){
+                if(closed||generation!=uiGeneration)return@synchronized
+                preparing=false
+                if(!success){
+                    _uiState.value=current.copy(errorMessage="Exercise completion was not saved. Try again.")
+                    return@synchronized
+                }
+                // Runtime atomically commits completion and clears its REST marker.
+                // Do not erase recovery before that transaction has succeeded.
+                restCheckpoint=null
+                val recurring=completedSets.map{it.focus}.filter{it!="Repeat the same setup."}
+                    .groupingBy{it}.eachCount().entries
+                    .sortedWith(compareByDescending<Map.Entry<String,Int>>{it.value}.thenBy{it.key})
+                    .map{it.key}
+                _uiState.value=WorkoutUiState.Summary(
+                    exerciseId=current.exerciseId,exerciseName=current.exerciseName,
+                    completedSets=completedSets.toList(),
+                    evidenceSummary=recurring.firstOrNull()?:current.focus,recurringEvidence=recurring,
+                )
+                refreshSelection()
+                lastCompletedSetId?.let{setId->
+                    runtime.loadGptAnalyses(setId){records->
+                        synchronized(this){
+                            if(closed||generation!=uiGeneration||lastCompletedSetId!=setId)return@synchronized
+                            val summary=_uiState.value as? WorkoutUiState.Summary?:return@synchronized
+                            _uiState.value=summary.copy(savedAnalyses=records.map(::analysisUi))
+                        }
+                    }
                 }
             }
         }
@@ -399,7 +467,9 @@ class WorkoutController(
         modelLabel:String="external-chatgpt",
         onCompleted:(Boolean)->Unit={},
     ){
+        if(closed||_uiState.value !is WorkoutUiState.Summary){onCompleted(false);return}
         val setId=lastCompletedSetId?:run{onCompleted(false);return}
+        val generation=uiGeneration
         val record=runCatching{
             GptAnalysisRecord(
                 analysisId="gpt-${UUID.randomUUID()}",
@@ -413,9 +483,10 @@ class WorkoutController(
             )
         }.getOrElse{onCompleted(false);return}
         runtime.appendGptAnalysis(record){success->
-            if(success){
+            if(success&&synchronized(this){!closed&&generation==uiGeneration&&lastCompletedSetId==setId}){
                 runtime.loadGptAnalyses(setId){records->
                     synchronized(this){
+                        if(closed||generation!=uiGeneration||lastCompletedSetId!=setId)return@synchronized
                         val current=_uiState.value as? WorkoutUiState.Summary?:return@synchronized
                         _uiState.value=current.copy(savedAnalyses=records.map(::analysisUi))
                     }
@@ -427,6 +498,8 @@ class WorkoutController(
 
     @Synchronized
     fun returnToSelection(){
+        if(closed||preparing||_uiState.value !is WorkoutUiState.Summary)return
+        uiGeneration++
         selectedExerciseId=null
         selectedStartRequest=null
         currentRepCount=0
@@ -438,7 +511,7 @@ class WorkoutController(
         lastCompletedSetId=null
         completedSets.clear()
         runtime.clearRestCheckpoint()
-        runtime.loadWorkoutSelection(::onSelectionSnapshotLoaded)
+        refreshSelection()
         _uiState.value=selectionState()
     }
 
@@ -446,10 +519,10 @@ class WorkoutController(
     internal fun onRuntimeSnapshot(snapshot:WorkoutRuntimeSnapshot){
         val exerciseId=selectedExerciseId?:return
         val bundle=InitialExerciseProfiles.resolveByExternalId(exerciseId)?:return
+        if(closed||preparing||_uiState.value is WorkoutUiState.Rest||_uiState.value is WorkoutUiState.Summary||
+            _uiState.value is WorkoutUiState.ExerciseSelection)return
         currentRepCount=snapshot.repCount
         latestCue=snapshot.cueText
-        if(_uiState.value is WorkoutUiState.Rest||_uiState.value is WorkoutUiState.Summary||
-            _uiState.value is WorkoutUiState.ExerciseSelection)return
 
         val active=_uiState.value is WorkoutUiState.ActiveSet||
             snapshot.lifecycleState==SetLifecycleState.ACTIVE_SET||
@@ -481,16 +554,28 @@ class WorkoutController(
     }
 
     @Synchronized
+    private fun refreshSelection(){
+        val request=++selectionRequest
+        runtime.loadWorkoutSelection{snapshot->
+            synchronized(this){
+                if(!closed&&request==selectionRequest)onSelectionSnapshotLoaded(snapshot)
+            }
+        }
+    }
+
+    @Synchronized
     private fun onSelectionSnapshotLoaded(snapshot:WorkoutSelectionSnapshot){
         selectionSnapshot=snapshot
+        selectionLoaded=true
+        completeRecoveryWhenReady()
         if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
     }
 
     @Synchronized
     private fun onRestCheckpointLoaded(checkpoint:RestCheckpoint?){
         if(checkpoint!=null){
-            recoveryPending=false
-            restoreRestCheckpoint(checkpoint)
+            deferredRecovery={restoreRestCheckpoint(checkpoint)}
+            completeRecoveryWhenReady()
             return
         }
         runtime.loadActiveSetRecovery(::onActiveSetRecoveryLoaded)
@@ -498,9 +583,17 @@ class WorkoutController(
 
     @Synchronized
     private fun onActiveSetRecoveryLoaded(recovery:ActiveSetRecovery?){
+        deferredRecovery={if(recovery!=null)restoreActiveSetRecovery(recovery)}
+        completeRecoveryWhenReady()
+    }
+
+    private fun completeRecoveryWhenReady(){
+        if(closed||!recoveryPending||!selectionLoaded)return
+        val action=deferredRecovery?:return
+        deferredRecovery=null
         recoveryPending=false
-        if(recovery!=null)restoreActiveSetRecovery(recovery)
-        else if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
+        action()
+        if(_uiState.value is WorkoutUiState.ExerciseSelection)_uiState.value=selectionState()
     }
 
     @Synchronized
@@ -509,6 +602,7 @@ class WorkoutController(
         val bundle=InitialExerciseProfiles.resolveByExternalId(recovery.execution.exerciseId)?:return
         runtime.resumeExercise(recovery.session,recovery.execution)
         selectedExerciseId=recovery.execution.exerciseId
+        priorWorkoutCompletedSets=completionFor(recovery.execution.exerciseId)
         selectedStartRequest=ExerciseStartRequest(
             recovery.execution.exerciseId,recovery.execution.plannedExerciseId,currentEquipmentContext(recovery.execution.exerciseId)
         )
@@ -523,7 +617,8 @@ class WorkoutController(
             val restStarted=recovery.endedAtEpochMs.takeIf{it>0L}?:clock.nowEpochMs()
             val checkpoint=RestCheckpoint(
                 recovery.session,recovery.execution,recovery.set,recovery.committedReps,
-                "Repeat the same setup.",recovery.set.plannedLoad?:recovery.set.actualLoad?.copy(source=LoadSource.PLANNED),restStarted,
+                recovery.completedSets.lastOrNull{it.set.setId==recovery.set.setId}?.focus?:"Repeat the same setup.",
+                recovery.set.actualLoad?.copy(source=LoadSource.PLANNED),restStarted,
                 recovery.completedSets,
             )
             restCheckpoint=checkpoint
@@ -560,6 +655,7 @@ class WorkoutController(
         val bundle=InitialExerciseProfiles.resolveByExternalId(checkpoint.execution.exerciseId)?:return
         runtime.resumeExercise(checkpoint.session,checkpoint.execution)
         selectedExerciseId=checkpoint.execution.exerciseId
+        priorWorkoutCompletedSets=completionFor(checkpoint.execution.exerciseId)
         selectedStartRequest=ExerciseStartRequest(
             checkpoint.execution.exerciseId,checkpoint.execution.plannedExerciseId,currentEquipmentContext(checkpoint.execution.exerciseId)
         )
@@ -598,7 +694,8 @@ class WorkoutController(
         runtime.resetPersonalCalibration(exerciseId,onCompleted)
     }
 
-    fun close(){runtime.close()}
+    @Synchronized
+    fun close(){closed=true;uiGeneration++;selectionRequest++;runtime.close()}
 
     private fun selectionState():WorkoutUiState.ExerciseSelection{
         val searchCandidates=InitialExerciseProfiles.all.map{
@@ -623,6 +720,7 @@ class WorkoutController(
             substitutionForExerciseId=substitutionForExerciseId,
             equipmentEditorExerciseId=equipmentEditorExerciseId,
             equipmentLabelInput=equipmentLabelInput,
+            errorMessage=selectionError,
         )
     }
 

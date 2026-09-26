@@ -1,6 +1,8 @@
 package com.gymbuddy.app.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -15,7 +17,7 @@ fun ExerciseSummaryScreen(
     onResetCalibration:()->Unit={},
 ){
     Column(
-        modifier=Modifier.fillMaxSize().padding(24.dp),
+        modifier=Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement=Arrangement.spacedBy(16.dp),
     ){
         Text(state.exerciseName,style=MaterialTheme.typography.h4)
