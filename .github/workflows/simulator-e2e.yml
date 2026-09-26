@@ -189,10 +189,11 @@ jobs:
           --tests com.gymbuddy.domain.integration.HarnessFuzzSafetyContractTest
           --stacktrace
 
-      - name: Seeded production movement safety fuzz
+      - name: Seeded production safety fuzz
         run: >-
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.ProductionMovementSeededFuzzTest
+          --tests com.gymbuddy.domain.tracking.PrimarySubjectLockSeededFuzzTest
           --stacktrace
 
       - name: Production movement vertical-slice gate
