@@ -90,13 +90,20 @@ class HarnessFuzzSafetyContractTest {
                         guidance,
                     )
                 }
-                "camera_changed",
-                "target_ambiguous",
-                "target_temporarily_lost" -> {
+                "target_ambiguous" -> {
                     assertFalse(
-                        "${contract.key}: ${contract.oracleReason} admitted biomechanics",
+                        "${contract.key}: target ambiguity admitted biomechanics",
                         tracking.allowsBiomechanics,
                     )
+                }
+                "camera_changed",
+                "target_temporarily_lost" -> {
+                    if(contract.oraclePause) {
+                        assertFalse(
+                            "${contract.key}: oracle-required ${contract.oracleReason} pause admitted biomechanics",
+                            tracking.allowsBiomechanics,
+                        )
+                    }
                 }
                 "target_observation_low" -> {
                     lowObservationCases++
