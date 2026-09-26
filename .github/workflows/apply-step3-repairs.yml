@@ -1,0 +1,32 @@
+name: apply-step3-repairs
+on:
+  push:
+    branches: [feature/step3-product-completion-2026-09-25]
+    paths: [.github/workflows/apply-step3-repairs.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact locally tested source and remove transfer files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = "466937a6f9ff44114164a31f24bf2a98ece186f2"
+          git merge-base --is-ancestor b949a1e032a851fd867aa895c9bef13a8fb87e5c HEAD
+          cat .review/step3-part0{0,1,2,3,4}.bin > /tmp/step3-repairs.gz
+          echo "84769371c39d911b7bc0ced55e724403253a289851df87c589ce4e8d4b107d14  /tmp/step3-repairs.gz" | sha256sum -c -
+          gzip -dc /tmp/step3-repairs.gz > /tmp/step3-repairs.patch
+          git apply --check --index /tmp/step3-repairs.patch
+          git apply --index /tmp/step3-repairs.patch
+          rm .review/step3-part0{0,1,2,3,4}.bin .github/workflows/apply-step3-repairs.yml .github/workflows/step3-source-snapshot.yml
+          rmdir .review
+          git add -A
+          git diff --cached --check
+          test "$(git write-tree)" = "3b3f22fd25f0487bef0959db39631e6b1a219371"
+          git -c user.name=github-actions[bot] -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -m "Fix Step 3 asynchronous state, atomic persistence and evidence summaries"
+          git push origin HEAD:refs/heads/feature/step3-product-completion-2026-09-25
