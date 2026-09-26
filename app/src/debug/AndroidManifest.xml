@@ -8,5 +8,6 @@
         <activity android:name=".PostMergeIntegrationE2EActivity" android:exported="true" />
         <activity android:name=".Step3ReviewE2EActivity" android:exported="true" />
         <activity android:name=".Step4WholeWorkflowE2EActivity" android:exported="true" />
+        <activity android:name=".Step3ProcessRecoveryE2EActivity" android:exported="true" />
     </application>
 </manifest>

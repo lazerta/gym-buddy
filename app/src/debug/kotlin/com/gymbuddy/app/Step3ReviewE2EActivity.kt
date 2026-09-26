@@ -31,6 +31,8 @@ class Step3ReviewE2EActivity:ComponentActivity() {
                 "reset_targets_selected_equipment" to ::resetTargetsSelectedEquipment,
                 "new_workout_failure_is_atomic" to ::newWorkoutFailureIsAtomic,
                 "completion_uses_durable_set_count" to ::completionUsesDurableSetCount,
+                "rest_write_failure_reaches_ui_and_retries" to ::restWriteFailureReachesUiAndRetries,
+                "pending_equipment_save_cannot_select_stale_context" to ::pendingEquipmentSaveCannotSelectStaleContext,
             )
             val rows=JSONArray()
             tests.forEach { (name,run)->
@@ -187,6 +189,67 @@ class Step3ReviewE2EActivity:ComponentActivity() {
             check(RoomWorkoutProductRepository(db.evidenceDao()).loadSelectionSnapshot().completions.single().completedSets==3) {
                 "Recreated controller overwrote the total with only its current execution"
             }
+        }
+    }
+
+    private fun restWriteFailureReachesUiAndRetries()=withRuntime { r,db ->
+        val sid="review-${UUID.randomUUID()}"
+        val plan=LoadSnapshot(20.0,"lb",LoadBasis.PER_SIDE,LoadSource.PLANNED,
+            ResistanceKind.EXTERNAL_LOAD,LoadMeasurementMode.ADDED_LOAD)
+        worker(r){
+            val session=WorkoutSessionRecord(sid,1,1000)
+            val execution=ExerciseExecutionRecord("$sid-e",sid,"dumbbell_lateral_raise",2,1100)
+            persistSet(db,session,execution,"$sid-set",1)
+            RoomWorkoutFlowRepository(db.evidenceDao()).saveRestCheckpoint(
+                RestCheckpointDraft("$sid-set","Repeat the same setup.",plan,2000))
+            RoomWorkoutProductRepository(db.evidenceDao()).setActiveSession(sid)
+        }
+        val c=onMain{WorkoutController(r)}
+        repeat(5){worker(r){}}
+        check((c.uiState.value as WorkoutUiState.Rest).plannedNextLoadText=="20")
+        worker(r){db.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_review_rest BEFORE INSERT ON workout_flow_states "+
+                "BEGIN SELECT RAISE(ABORT,'injected rest failure'); END")}
+        try{
+            onMain{c.updateNextLoad("25")}
+            repeat(3){worker(r){}}
+            val failed=c.uiState.value as WorkoutUiState.Rest
+            check(failed.plannedNextLoadText=="25" && failed.loadSaveFailed && failed.errorMessage!=null)
+            onMain{c.nextSet();c.finishExercise()}
+            check(c.uiState.value is WorkoutUiState.Rest)
+            worker(r){check(RoomWorkoutFlowRepository(db.evidenceDao()).loadRestCheckpoint()!!.plannedNextLoad==plan)}
+        }finally{worker(r){db.openHelper.writableDatabase.execSQL("DROP TRIGGER IF EXISTS fail_review_rest")}}
+        onMain{c.retryRestSave()}
+        repeat(4){worker(r){}}
+        val saved=c.uiState.value as WorkoutUiState.Rest
+        check(!saved.loadSaveFailed && !saved.savingLoad && saved.errorMessage==null)
+        worker(r){check(RoomWorkoutFlowRepository(db.evidenceDao()).loadRestCheckpoint()!!.plannedNextLoad==plan.copy(value=25.0))}
+    }
+
+    private fun pendingEquipmentSaveCannotSelectStaleContext()=withRuntime { r,db ->
+        worker(r){db.evidenceDao().deleteWorkoutFlowState("active");RoomWorkoutProductRepository(db.evidenceDao()).setActiveSession(null)}
+        val c=onMain{WorkoutController(r)}
+        repeat(5){worker(r){}}
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        r.analysisExecutor.execute{entered.countDown();check(release.await(15,TimeUnit.SECONDS))}
+        check(entered.await(5,TimeUnit.SECONDS))
+        try{
+            onMain{
+                c.editEquipment("dumbbell_lateral_raise");c.updateEquipmentLabel("Fresh repaired equipment")
+                c.saveEquipmentContext();c.selectExercise("dumbbell_lateral_raise")
+            }
+            check((c.uiState.value as WorkoutUiState.ExerciseSelection).busy)
+        }finally{release.countDown()}
+        repeat(5){worker(r){}}
+        check(c.uiState.value is WorkoutUiState.ExerciseSelection)
+        onMain{c.selectExercise("dumbbell_lateral_raise")}
+        repeat(5){worker(r){}}
+        check(c.uiState.value is WorkoutUiState.CameraSetup)
+        worker(r){
+            val request=field(r,"startRequest") as ExerciseStartRequest
+            val expected=db.evidenceDao().readProductSnapshot().preferences.first{it.exerciseId==request.actualExerciseId}.equipmentContextId
+            check(request.equipmentContext?.contextId==expected && expected!=null)
+            check((field(r,"activeConfig") as AnalysisConfig).equipmentProfile?.profileId==expected)
         }
     }
 

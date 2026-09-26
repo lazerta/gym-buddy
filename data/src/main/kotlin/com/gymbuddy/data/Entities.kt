@@ -42,6 +42,10 @@ data class SetEntity(
     val plannedLoadUnit:String?=null,
     @ColumnInfo(defaultValue="'UNKNOWN'") val plannedLoadBasis:String="UNKNOWN",
     @ColumnInfo(defaultValue="'UNKNOWN'") val plannedLoadSource:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val actualResistanceKind:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val actualMeasurementMode:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedResistanceKind:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedMeasurementMode:String="UNKNOWN",
 )
 
 @Entity(tableName="analysis_contexts",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)])
@@ -117,6 +121,10 @@ data class WorkoutFlowStateEntity(
     @ColumnInfo(defaultValue="'UNKNOWN'") val plannedNextLoadBasis:String="UNKNOWN",
     @ColumnInfo(defaultValue="'UNKNOWN'") val plannedNextLoadSource:String="UNKNOWN",
     val restStartedAtEpochMs:Long,
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedNextResistanceKind:String="UNKNOWN",
+    @ColumnInfo(defaultValue="'UNKNOWN'") val plannedNextMeasurementMode:String="UNKNOWN",
+    val restStartedAtElapsedMs:Long?=null,
+    val restBootId:String?=null,
 )
 
 @Entity(tableName="interrupted_sets",foreignKeys=[ForeignKey(entity=SetEntity::class,parentColumns=["setId"],childColumns=["setId"],onDelete=ForeignKey.CASCADE)])

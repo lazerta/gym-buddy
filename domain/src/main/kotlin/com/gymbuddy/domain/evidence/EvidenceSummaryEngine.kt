@@ -12,6 +12,15 @@ data class SetCoachingSummary(
     val recurringRuleIds:List<String> = emptyList(),
     val deliveredCueRuleIds:List<String> = emptyList(),
     val unknownObservationCount:Int=0,
+    val resolvedRuleIds:Set<String> = emptySet(),
+    val cueResponses:List<DeliveredCueResponseSummary> = emptyList(),
+)
+
+data class DeliveredCueResponseSummary(
+    val cueId:String,
+    val ruleId:String,
+    val state:CueResponseState,
+    val responseRepId:String?=null,
 )
 
 class EvidenceSummaryEngine(private val ruleText:(String)->String={it}){
@@ -45,8 +54,17 @@ class EvidenceSummaryEngine(private val ruleText:(String)->String={it}){
             }.thenByDescending{it.value.map{row->row.repId}.distinct().size}.thenBy{it.key})
             .map{it.key}
         val focus=recurring.firstOrNull()
+        val responses=delivered.map{cue->
+            val response=if(unreliable||evidence.summary==null)null else evidence.responses
+                .filter{it.cueId==cue.cueId&&validReps[it.repId]?.let{rep->
+                    rep.completedAtUs>cue.emittedAtUs&&assessed.any{o->o.repId==rep.repId&&o.ruleId==cue.ruleId}
+                }==true}
+                .maxWithOrNull(compareBy({validReps.getValue(it.repId).ordinal},{it.repId}))
+            DeliveredCueResponseSummary(cue.cueId,cue.ruleId,response?.state?:CueResponseState.UNKNOWN,response?.repId)
+        }
         return SetCoachingSummary(focus,focus?.let(ruleText)?:"Repeat the same setup.",recurring,
-            delivered.map{it.ruleId}.distinct(),evidence.observations.count{it.state==FormObservationState.UNKNOWN})
+            delivered.map{it.ruleId}.distinct(),evidence.observations.count{it.state==FormObservationState.UNKNOWN},
+            if(unreliable||evidence.summary==null)emptySet() else resolved,responses)
     }
     private fun severityWeight(severity:FormRuleSeverity)=when(severity){
         FormRuleSeverity.MAJOR->3

@@ -2,6 +2,10 @@ package com.gymbuddy.app.controller
 
 import com.gymbuddy.domain.persistence.LoadBasis
 import com.gymbuddy.domain.persistence.LoadSource
+import com.gymbuddy.domain.persistence.ResistanceKind
+import com.gymbuddy.domain.persistence.LoadMeasurementMode
+import com.gymbuddy.domain.persistence.RestTimerAnchor
+import com.gymbuddy.domain.evidence.SetCoachingSummary
 
 enum class WorkoutDay(val label:String){PUSH("Push"),PULL("Pull"),LEGS("Legs")}
 
@@ -19,6 +23,7 @@ data class GptAnalysisUiState(
     val modelLabel:String,
     val summary:String,
     val createdAtEpochMs:Long,
+    val recommendations:List<String> = emptyList(),
 )
 
 enum class CameraReadinessUi { SETTING_UP, READY }
@@ -28,6 +33,8 @@ data class CompletedSetUiState(
     val reps:Int,
     val actualLoadText:String,
     val focus:String,
+    val setId:String?=null,
+    val coachingSummary:SetCoachingSummary?=null,
 )
 
 sealed interface WorkoutUiState {
@@ -43,6 +50,7 @@ sealed interface WorkoutUiState {
         val equipmentEditorExerciseId:String?=null,
         val equipmentLabelInput:String="",
         val errorMessage:String?=null,
+        val busy:Boolean=false,
     ):WorkoutUiState
 
     data class CameraSetup(
@@ -78,6 +86,11 @@ sealed interface WorkoutUiState {
         val plannedNextLoadSource:LoadSource=LoadSource.PLANNED,
         val errorMessage:String?=null,
         val busy:Boolean=false,
+        val savingLoad:Boolean=false,
+        val loadSaveFailed:Boolean=false,
+        val plannedNextResistanceKind:ResistanceKind=ResistanceKind.UNKNOWN,
+        val plannedNextMeasurementMode:LoadMeasurementMode=LoadMeasurementMode.UNKNOWN,
+        val timerAnchor:RestTimerAnchor?=null,
     ):WorkoutUiState
 
     data class Summary(
@@ -87,6 +100,7 @@ sealed interface WorkoutUiState {
         val evidenceSummary:String,
         val recurringEvidence:List<String> = emptyList(),
         val savedAnalyses:List<GptAnalysisUiState> = emptyList(),
+        val cueResponseEvidence:List<String> = emptyList(),
     ):WorkoutUiState
 }
 

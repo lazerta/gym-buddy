@@ -6,6 +6,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.gymbuddy.app.controller.*
@@ -26,15 +31,20 @@ fun ExerciseSelectionScreen(
     onSaveEquipmentContext:()->Unit={},
     onStartNewWorkout:()->Unit={},
 ){
+    val editorRequester=remember{BringIntoViewRequester()}
+    LaunchedEffect(state.equipmentEditorExerciseId){
+        if(state.equipmentEditorExerciseId!=null)editorRequester.bringIntoView()
+    }
     Column(
         modifier=Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement=Arrangement.spacedBy(12.dp),
     ){
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
             Text("Gym Buddy",style=MaterialTheme.typography.h4)
-            TextButton(onClick=onStartNewWorkout){Text("New workout")}
+            TextButton(enabled=!state.busy,onClick=onStartNewWorkout){Text("New workout")}
         }
         state.errorMessage?.let{Text(it,color=MaterialTheme.colors.error)}
+        if(state.busy)Text("Saving…")
         TabRow(selectedTabIndex=WorkoutDay.entries.indexOf(state.selectedDay)){
             WorkoutDay.entries.forEach{day->
                 Tab(selected=day==state.selectedDay,onClick={onSelectDay(day)},text={Text(day.label)})
@@ -50,19 +60,13 @@ fun ExerciseSelectionScreen(
                     onSubstitute={onBeginSubstitution(exercise.exerciseId)},
                     onFavorite={onToggleFavorite(exercise.exerciseId)},
                     onEquipment={onEditEquipment(exercise.exerciseId)},
+                    enabled=!state.busy,
                 )
-                if(state.equipmentEditorExerciseId==exercise.exerciseId){
-                    EquipmentEditor(
-                        value=state.equipmentLabelInput,
-                        onValueChange=onEquipmentLabelChange,
-                        onSave=onSaveEquipmentContext,
-                    )
-                }
             }
         }
 
         if(!state.otherExerciseOpen){
-            OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick=onOpenOtherExercise){
+            OutlinedButton(modifier=Modifier.fillMaxWidth(),enabled=!state.busy,onClick=onOpenOtherExercise){
                 Text("Other exercise")
             }
         }else{
@@ -84,25 +88,26 @@ fun ExerciseSelectionScreen(
             if(state.favoriteExercises.isNotEmpty()){
                 Text("Favorites",style=MaterialTheme.typography.subtitle1)
                 state.favoriteExercises.forEach{exercise->
-                    CompactExerciseRow(exercise,onSelectOtherExercise,onToggleFavorite,onEditEquipment)
+                    CompactExerciseRow(exercise,onSelectOtherExercise,onToggleFavorite,onEditEquipment,!state.busy,"favorite")
                 }
             }
             if(state.recentExercises.isNotEmpty()){
                 Text("Recent",style=MaterialTheme.typography.subtitle1)
                 state.recentExercises.forEach{exercise->
-                    CompactExerciseRow(exercise,onSelectOtherExercise,onToggleFavorite,onEditEquipment)
+                    CompactExerciseRow(exercise,onSelectOtherExercise,onToggleFavorite,onEditEquipment,!state.busy,"recent")
                 }
             }
             Text("Results",style=MaterialTheme.typography.subtitle1)
             state.searchResults.forEach{exercise->
-                CompactExerciseRow(exercise,onSelectOtherExercise,onToggleFavorite,onEditEquipment)
-                if(state.equipmentEditorExerciseId==exercise.exerciseId){
-                    EquipmentEditor(
-                        value=state.equipmentLabelInput,
-                        onValueChange=onEquipmentLabelChange,
-                        onSave=onSaveEquipmentContext,
-                    )
-                }
+                CompactExerciseRow(exercise,onSelectOtherExercise,onToggleFavorite,onEditEquipment,!state.busy,"result")
+            }
+        }
+        // The action can originate in Favorites, Recent or Results, regardless
+        // of the active day/query. Never gate editor placement on those lists.
+        state.equipmentEditorExerciseId?.let{id->
+            Column(Modifier.fillMaxWidth().bringIntoViewRequester(editorRequester).testTag("equipment-editor")){
+                Text("Equipment",style=MaterialTheme.typography.h6)
+                EquipmentEditor(state.equipmentLabelInput,onEquipmentLabelChange,onSaveEquipmentContext,!state.busy)
             }
         }
     }
@@ -115,11 +120,12 @@ private fun ExerciseRow(
     onSubstitute:()->Unit,
     onFavorite:()->Unit,
     onEquipment:()->Unit,
+    enabled:Boolean=true,
 ){
     Card(modifier=Modifier.fillMaxWidth(),elevation=4.dp){
         Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
             Row(
-                Modifier.fillMaxWidth().clickable(onClick=onSelect),
+                Modifier.fillMaxWidth().clickable(enabled=enabled,onClick=onSelect),
                 horizontalArrangement=Arrangement.SpaceBetween,
             ){
                 Column{
@@ -130,9 +136,9 @@ private fun ExerciseRow(
                 Text(if(exercise.favorite)"★" else "☆")
             }
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                TextButton(onClick=onSubstitute){Text("Substitute")}
-                TextButton(onClick=onEquipment){Text("Equipment")}
-                TextButton(onClick=onFavorite){Text(if(exercise.favorite)"Unfavorite" else "Favorite")}
+                TextButton(enabled=enabled,onClick=onSubstitute){Text("Substitute")}
+                TextButton(enabled=enabled,onClick=onEquipment){Text("Equipment")}
+                TextButton(enabled=enabled,onClick=onFavorite){Text(if(exercise.favorite)"Unfavorite" else "Favorite")}
             }
         }
     }
@@ -144,18 +150,20 @@ private fun CompactExerciseRow(
     onSelect:(String)->Unit,
     onFavorite:(String)->Unit,
     onEquipment:(String)->Unit,
+    enabled:Boolean,
+    section:String,
 ){
     Card(modifier=Modifier.fillMaxWidth(),elevation=2.dp){
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement=Arrangement.SpaceBetween,
         ){
-            Column(Modifier.weight(1f).clickable{onSelect(exercise.exerciseId)}){
+            Column(Modifier.weight(1f).clickable(enabled=enabled){onSelect(exercise.exerciseId)}){
                 Text(exercise.displayName)
                 exercise.equipmentLabel?.let{Text("Equipment: $it",style=MaterialTheme.typography.caption)}
             }
-            TextButton(onClick={onEquipment(exercise.exerciseId)}){Text("Equipment")}
-            TextButton(onClick={onFavorite(exercise.exerciseId)}){Text(if(exercise.favorite)"★" else "☆")}
+            TextButton(modifier=Modifier.testTag("$section-${exercise.exerciseId}-equipment"),enabled=enabled,onClick={onEquipment(exercise.exerciseId)}){Text("Equipment")}
+            TextButton(enabled=enabled,onClick={onFavorite(exercise.exerciseId)}){Text(if(exercise.favorite)"★" else "☆")}
         }
     }
 }
@@ -165,16 +173,18 @@ private fun EquipmentEditor(
     value:String,
     onValueChange:(String)->Unit,
     onSave:()->Unit,
+    enabled:Boolean=true,
 ){
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
         OutlinedTextField(
-            modifier=Modifier.weight(1f),
+            modifier=Modifier.weight(1f).testTag("equipment-label"),
+            enabled=enabled,
             value=value,
             onValueChange=onValueChange,
             label={Text("Equipment label")},
             placeholder={Text("e.g. Smith A or Incline bench")},
             singleLine=true,
         )
-        Button(onClick=onSave){Text("Save")}
+        Button(enabled=enabled,onClick=onSave){Text("Save")}
     }
 }

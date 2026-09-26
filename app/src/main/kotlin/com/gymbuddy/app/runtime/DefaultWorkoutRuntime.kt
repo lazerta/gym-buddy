@@ -287,8 +287,10 @@ class DefaultWorkoutRuntime(
     }
 
     override fun saveRestCheckpoint(checkpoint:RestCheckpointDraft){
-        if(!worker.isShutdown)worker.execute{flowRepository.saveRestCheckpoint(checkpoint)}
+        saveRestCheckpoint(checkpoint){}
     }
+    override fun saveRestCheckpoint(checkpoint:RestCheckpointDraft,onCompleted:(Boolean)->Unit)=
+        command(onCompleted){flowRepository.saveRestCheckpoint(checkpoint)}
     override fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit){
         if(worker.isShutdown){onLoaded(null);return}
         worker.execute{onLoaded(flowRepository.loadRestCheckpoint())}

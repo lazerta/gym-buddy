@@ -14,6 +14,10 @@ import com.gymbuddy.domain.persistence.CueDeliveryRecord
 import com.gymbuddy.domain.persistence.CueDeliveryState
 import com.gymbuddy.domain.persistence.ExerciseExecutionRecord
 import com.gymbuddy.domain.persistence.LoadSnapshot
+import com.gymbuddy.domain.persistence.LoadSource
+import com.gymbuddy.domain.persistence.LoadBasis
+import com.gymbuddy.domain.persistence.ResistanceKind
+import com.gymbuddy.domain.persistence.LoadMeasurementMode
 import com.gymbuddy.domain.persistence.PersistedSetEvidence
 import com.gymbuddy.domain.persistence.SetRecord
 import com.gymbuddy.domain.persistence.SetSummary
@@ -30,6 +34,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatGptContextExporterTest {
+    @Test fun loadMeasurementKindAndSourceAreExplicitAndIndependentInExport(){
+        val original=context("current","e","s","incline_dumbbell_press",300,false)
+        val planned=LoadSnapshot(25.0,"lb",LoadBasis.PER_SIDE,LoadSource.PLANNED,
+            ResistanceKind.EXTERNAL_LOAD,LoadMeasurementMode.ADDED_LOAD)
+        val actual=planned.copy(source=LoadSource.CARRIED_FROM_PLAN)
+        val current=original.copy(evidence=original.evidence.copy(set=original.evidence.set.copy(actualLoad=actual,plannedLoad=planned)))
+        val json=ChatGptContextExporter(FakeRepository(current,emptyList())).export("current")
+        assertTrue(json.contains("\"source\":\"CARRIED_FROM_PLAN\""))
+        assertTrue(json.contains("\"source\":\"PLANNED\""))
+        assertTrue(json.contains("\"resistance_kind\":\"EXTERNAL_LOAD\""))
+        assertTrue(json.contains("\"measurement_mode\":\"ADDED_LOAD\""))
+        assertTrue(json.contains("not an independently measured"))
+        assertEquals(planned,current.evidence.set.plannedLoad)
+    }
+    @Test fun legacyLoadExportDoesNotInferKindOrMeasurementMode(){
+        val original=context("current","e","s","incline_dumbbell_press",300,false)
+        val current=original.copy(evidence=original.evidence.copy(set=original.evidence.set.copy(actualLoad=LoadSnapshot(25.0,"lb"))))
+        val json=ChatGptContextExporter(FakeRepository(current,emptyList())).export("current")
+        assertTrue(json.contains("\"resistance_kind\":\"UNKNOWN\""))
+        assertTrue(json.contains("\"measurement_mode\":\"UNKNOWN\""))
+    }
+
     @Test fun unknownLegacyUptimeCannotSortAboveOrHideDatedHistory() {
         val exercise="incline_dumbbell_press"
         val current=context("current","ec","sc",exercise,1000,false,1_800_000_000_000L)
@@ -57,7 +83,7 @@ class ChatGptContextExporterTest {
         ).export("current")
 
         assertEquals(first,second)
-        assertTrue(first.startsWith("{\"schema\":\"gym_buddy_chatgpt_context\",\"schema_version\":1"))
+        assertTrue(first.startsWith("{\"schema\":\"gym_buddy_chatgpt_context\",\"schema_version\":2"))
         assertTrue(first.contains("\"current_set\""))
         assertTrue(first.contains("\"recent_comparable_history\""))
         assertTrue(first.contains("\"source_references\""))

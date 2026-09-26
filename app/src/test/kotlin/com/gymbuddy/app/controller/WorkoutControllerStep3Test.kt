@@ -59,7 +59,7 @@ class WorkoutControllerStep3Test {
         c.updateNextLoadUnit("lb")
         c.updateNextLoadBasis(LoadBasis.PER_IMPLEMENT)
         c.nextSet()
-        assertEquals(LoadSource.USER_ENTERED,runtime.lastActual!!.source)
+        assertEquals(LoadSource.CARRIED_FROM_PLAN,runtime.lastActual!!.source)
         assertEquals(LoadSource.PLANNED,runtime.lastPlanned!!.source)
         assertEquals(LoadBasis.PER_IMPLEMENT,runtime.lastActual!!.basis)
         assertEquals(25.0,runtime.lastPlanned!!.value,0.0)

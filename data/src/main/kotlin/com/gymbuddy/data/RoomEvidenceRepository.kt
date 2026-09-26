@@ -50,6 +50,10 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
                     r.plannedLoad?.value,r.plannedLoad?.unit,
                     r.plannedLoad?.basis?.name?:LoadBasis.UNKNOWN.name,
                     r.plannedLoad?.source?.name?:LoadSource.UNKNOWN.name,
+                    r.actualLoad?.resistanceKind?.name?:ResistanceKind.UNKNOWN.name,
+                    r.actualLoad?.measurementMode?.name?:LoadMeasurementMode.UNKNOWN.name,
+                    r.plannedLoad?.resistanceKind?.name?:ResistanceKind.UNKNOWN.name,
+                    r.plannedLoad?.measurementMode?.name?:LoadMeasurementMode.UNKNOWN.name,
                 ),
                 x,
             )
@@ -59,8 +63,8 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
                     e.setOrdinal==r.setOrdinal&&
                     e.startedAtUs==r.startedAtUs&&
                     e.startedAtEpochMs==r.startedAtEpochMs&&
-                    loadSnapshot(e.actualLoadValue,e.actualLoadUnit,e.actualLoadBasis,e.actualLoadSource)==r.actualLoad&&
-                    loadSnapshot(e.plannedLoadValue,e.plannedLoadUnit,e.plannedLoadBasis,e.plannedLoadSource)==r.plannedLoad
+                    loadSnapshot(e.actualLoadValue,e.actualLoadUnit,e.actualLoadBasis,e.actualLoadSource,e.actualResistanceKind,e.actualMeasurementMode)==r.actualLoad&&
+                    loadSnapshot(e.plannedLoadValue,e.plannedLoadUnit,e.plannedLoadBasis,e.plannedLoadSource,e.plannedResistanceKind,e.plannedMeasurementMode)==r.plannedLoad
             )
             require(dao.analysisContext(r.setId)==x)
         }
@@ -218,8 +222,8 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
         return PersistedSetEvidence(
             SetRecord(
                 s.setId,s.executionId,s.setOrdinal,s.startedAtUs,
-                loadSnapshot(s.actualLoadValue,s.actualLoadUnit,s.actualLoadBasis,s.actualLoadSource),s.startedAtEpochMs,
-                loadSnapshot(s.plannedLoadValue,s.plannedLoadUnit,s.plannedLoadBasis,s.plannedLoadSource),
+                loadSnapshot(s.actualLoadValue,s.actualLoadUnit,s.actualLoadBasis,s.actualLoadSource,s.actualResistanceKind,s.actualMeasurementMode),s.startedAtEpochMs,
+                loadSnapshot(s.plannedLoadValue,s.plannedLoadUnit,s.plannedLoadBasis,s.plannedLoadSource,s.plannedResistanceKind,s.plannedMeasurementMode),
             ),
             ctx.toAnalysisProvenance(),reps,obs,cues,responses,tr,sum,deliveries,cueObservationIds,
             dao.invalidAttemptsForSet(setId).map{row->
@@ -233,9 +237,10 @@ class RoomEvidenceRepository(private val dao:EvidenceDao):EvidenceRepository {
 
     private fun loadSnapshot(
         value:Double?,unit:String?,basis:String=LoadBasis.UNKNOWN.name,source:String=LoadSource.UNKNOWN.name,
+        kind:String=ResistanceKind.UNKNOWN.name,mode:String=LoadMeasurementMode.UNKNOWN.name,
     ):LoadSnapshot?{
         require(value!=null||unit==null)
-        return value?.let{LoadSnapshot(it,unit,LoadBasis.valueOf(basis),LoadSource.valueOf(source))}
+        return value?.let{LoadSnapshot(it,unit,LoadBasis.valueOf(basis),LoadSource.valueOf(source),ResistanceKind.valueOf(kind),LoadMeasurementMode.valueOf(mode))}
     }
 
     private data class RepEntities(

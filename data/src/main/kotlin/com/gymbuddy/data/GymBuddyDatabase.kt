@@ -13,7 +13,7 @@ import androidx.room.RoomDatabase
         ExercisePreferenceEntity::class,EquipmentContextEntity::class,WorkoutExerciseCompletionEntity::class,
         WorkoutProductStateEntity::class,GptAnalysisEntity::class,
     ],
-    version=8,
+    version=9,
     exportSchema=true,
 )
 abstract class GymBuddyDatabase:RoomDatabase(){abstract fun evidenceDao():EvidenceDao}

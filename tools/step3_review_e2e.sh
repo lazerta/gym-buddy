@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 p=json.loads(Path('step3-review-e2e.json').read_text())
 print(json.dumps(p,indent=2))
-expected={'queued_preparation_cannot_reopen_closed_runtime','selection_leaves_ui_thread_free','selection_failure_rolls_back_and_retries','reset_targets_selected_equipment','new_workout_failure_is_atomic','completion_uses_durable_set_count'}
+expected={'queued_preparation_cannot_reopen_closed_runtime','selection_leaves_ui_thread_free','selection_failure_rolls_back_and_retries','reset_targets_selected_equipment','new_workout_failure_is_atomic','completion_uses_durable_set_count','rest_write_failure_reaches_ui_and_retries','pending_equipment_save_cannot_select_stale_context'}
 assert len(p['tests'])==len(expected) and {t['name'] for t in p['tests']}==expected
 assert p['passed'] is True and all(t['passed'] is True for t in p['tests']), p
 print('STEP3_REVIEW_E2E_PASS')

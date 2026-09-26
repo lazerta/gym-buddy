@@ -5,7 +5,7 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import com.gymbuddy.app.controller.*
-import com.gymbuddy.domain.persistence.LoadBasis
+import com.gymbuddy.domain.persistence.*
 
 @Composable
 fun GymBuddyApp(
@@ -33,6 +33,10 @@ fun GymBuddyApp(
     onStartNewWorkout:()->Unit={},
     onNextLoadUnitChange:(String)->Unit={},
     onNextLoadBasisChange:(LoadBasis)->Unit={},
+    onNextResistanceKindChange:(ResistanceKind)->Unit={},
+    onNextMeasurementModeChange:(LoadMeasurementMode)->Unit={},
+    onRetryRestSave:()->Unit={},
+    onSaveExternalAnalysis:(String,List<String>,String,(Boolean)->Unit)->Unit={_,_,_,done->done(false)},
 ){
     LaunchedEffect(state.requiresCamera){onCameraNeededChanged(state.requiresCamera)}
     MaterialTheme{
@@ -61,12 +65,16 @@ fun GymBuddyApp(
                 onFinishExercise=onFinishExercise,
                 onNextLoadUnitChange=onNextLoadUnitChange,
                 onNextLoadBasisChange=onNextLoadBasisChange,
+                onNextResistanceKindChange=onNextResistanceKindChange,
+                onNextMeasurementModeChange=onNextMeasurementModeChange,
+                onRetryRestSave=onRetryRestSave,
             )
             is WorkoutUiState.Summary->ExerciseSummaryScreen(
                 state=state,
                 onAskChatGpt=onAskChatGpt,
                 onResetCalibration=onResetCalibration,
                 onReturnToExercises=onReturnToExercises,
+                onSaveExternalAnalysis=onSaveExternalAnalysis,
             )
         }
     }

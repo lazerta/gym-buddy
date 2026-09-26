@@ -49,6 +49,9 @@ interface WorkoutRuntimeGateway:AutoCloseable {
     fun frameConsumer(listener:(WorkoutRuntimeSnapshot)->Unit):FrameConsumer<MPImage>
 
     fun saveRestCheckpoint(checkpoint:RestCheckpointDraft)
+    fun saveRestCheckpoint(checkpoint:RestCheckpointDraft,onCompleted:(Boolean)->Unit){
+        onCompleted(runCatching{saveRestCheckpoint(checkpoint)}.isSuccess)
+    }
     fun loadRestCheckpoint(onLoaded:(RestCheckpoint?)->Unit)
     fun loadActiveSetRecovery(onLoaded:(ActiveSetRecovery?)->Unit){onLoaded(null)}
     fun markActiveSetInterrupted(setId:String,recoveredAtEpochMs:Long,committedReps:Int)=Unit
