@@ -85,7 +85,10 @@ class InitialExerciseProfilesIntegrationTest {
                 1_000_000L to mid,
                 1_250_000L to startAngle,
             ).forEachIndexed { index, (ts, angle) ->
-                val result = pipeline.process(PoseFrame(index.toLong(), ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))))
+                val result = pipeline.process(
+                    PoseFrame(index.toLong(), ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))),
+                    TrackingObservationContext(observedViewClass=bundle.profile.cameraProfile.preferredViewClass),
+                )
                 completed += result.movement.repEvidence.size
             }
             assertEquals("${bundle.definition.exerciseId} production pipeline rep count", 1, completed)
@@ -101,7 +104,10 @@ class InitialExerciseProfilesIntegrationTest {
         fun process(ts:Long, angle:Double, cameraMotionScore:Double?=null) =
             pipeline.process(
                 PoseFrame(ts, ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))),
-                TrackingObservationContext(cameraMotionScore=cameraMotionScore),
+                TrackingObservationContext(
+                    observedViewClass=bundle.profile.cameraProfile.preferredViewClass,
+                    cameraMotionScore=cameraMotionScore,
+                ),
             ).also { completed += it.movement.repEvidence.size }
 
         process(0,20.0)
