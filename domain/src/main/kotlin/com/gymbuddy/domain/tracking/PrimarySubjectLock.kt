@@ -27,7 +27,7 @@ data class PrimarySubjectLockConfig(
     val shortOcclusionGraceUs: Long = 450_000L,
     val lostAfterUs: Long = 1_500_000L,
     val reacquireDwellFrames: Int = 2,
-    val maxSingleFrameScaleRatio: Double = 1.35,
+    val maxSingleFrameScaleRatio: Double = 1.25,
 ) {
     init {
         require(minCandidateLandmarks >= 1)
@@ -270,9 +270,7 @@ class PrimarySubjectLock(
             fingerprint.scale / candidate.scale,
             candidate.scale / fingerprint.scale,
         )
-        if (state == PrimarySubjectLockState.LOCKED &&
-            scaleRatio > config.maxSingleFrameScaleRatio
-        ) {
+        if (scaleRatio > config.maxSingleFrameScaleRatio) {
             return 0.0
         }
         val scale = scaleSimilarity(fingerprint.scale, candidate.scale)
