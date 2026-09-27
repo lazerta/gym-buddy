@@ -20,7 +20,16 @@ data class CameraProfile(override val profileId:String,override val profileVersi
 
 enum class SignalKind { JOINT_ANGLE,NORMALIZED_POINT_DISTANCE,BODY_LOCAL_DISPLACEMENT,VELOCITY,DIRECTION,REVERSAL,PHASE_DWELL,ROM_PROXY,BILATERAL_TIMING,TRAJECTORY_DEVIATION,HOLD_DURATION,CONFIDENCE }
 enum class SignalUnit { UNITLESS,NORMALIZED,DEGREES,RADIANS,METERS,METERS_PER_SECOND,MILLISECONDS,SECONDS }
-data class SignalDefinition(val signalId:String,val kind:SignalKind,val unit:SignalUnit,val requiredLandmarkIds:Set<String>,val parameters:Map<String,Double> = emptyMap(),val orderedLandmarkIds:List<String> = emptyList()){
+enum class SignalCoordinateSpace { BODY_LOCAL_NORMALIZED,BODY_LOCAL_WORLD }
+data class SignalDefinition(
+    val signalId:String,
+    val kind:SignalKind,
+    val unit:SignalUnit,
+    val requiredLandmarkIds:Set<String>,
+    val parameters:Map<String,Double> = emptyMap(),
+    val orderedLandmarkIds:List<String> = emptyList(),
+    val coordinateSpace:SignalCoordinateSpace = SignalCoordinateSpace.BODY_LOCAL_NORMALIZED,
+){
     init{
         requireIdentifier(signalId,"signalId");require(requiredLandmarkIds.none{it.isBlank()});require(parameters.keys.none{it.isBlank()});require(parameters.values.all{it.isFinite()});require(orderedLandmarkIds.none{it.isBlank()});require(orderedLandmarkIds.distinct().size==orderedLandmarkIds.size);require(orderedLandmarkIds.all{it in requiredLandmarkIds})
         if(kind==SignalKind.JOINT_ANGLE&&unit==SignalUnit.NORMALIZED){require(parameters.containsKey("scale")||parameters.containsKey("value_scale")){"normalized JOINT_ANGLE requires an explicit scale"}}
