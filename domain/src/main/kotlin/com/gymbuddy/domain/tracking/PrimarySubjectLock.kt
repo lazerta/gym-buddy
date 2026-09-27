@@ -270,9 +270,7 @@ class PrimarySubjectLock(
             fingerprint.scale / candidate.scale,
             candidate.scale / fingerprint.scale,
         )
-        if (state == PrimarySubjectLockState.LOCKED &&
-            scaleRatio > config.maxSingleFrameScaleRatio
-        ) {
+        if (scaleRatio > config.maxSingleFrameScaleRatio) {
             return 0.0
         }
         val scale = scaleSimilarity(fingerprint.scale, candidate.scale)
