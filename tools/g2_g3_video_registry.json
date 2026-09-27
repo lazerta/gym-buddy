@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "target_fps": 5.0,
+  "cases": [
+    {
+      "id": "g2_incline_db_press_strengthover40_18",
+      "exercise_id": "incline_db_press",
+      "canonical_exercise": "Incline Dumbbell Press",
+      "source_url": "https://www.youtube.com/watch?v=YdNonwVSUfc",
+      "source_kind": "youtube",
+      "expected_reps": 18,
+      "label_basis": "source_title_and_description",
+      "view_requirement": "side_or_oblique",
+      "equipment_requirement": "incline_bench_and_two_dumbbells",
+      "clean_form_claim": false
+    },
+    {
+      "id": "g2_smith_squat_ron_harris_12",
+      "exercise_id": "smith_squat",
+      "canonical_exercise": "Smith Machine Squat",
+      "source_url": "https://www.youtube.com/watch?v=4yv8oo40pKw",
+      "source_kind": "youtube",
+      "expected_reps": 12,
+      "label_basis": "source_title_and_description",
+      "view_requirement": "side_or_oblique",
+      "equipment_requirement": "smith_machine",
+      "clean_form_claim": false
+    },
+    {
+      "id": "g2_lateral_raise_ray_10",
+      "exercise_id": "lateral_raise",
+      "canonical_exercise": "Dumbbell Lateral Raise",
+      "source_url": "https://www.youtube.com/watch?v=cdZjA3b89JI",
+      "source_kind": "youtube",
+      "expected_reps": 10,
+      "label_basis": "source_title",
+      "view_requirement": "front_or_front_oblique",
+      "equipment_requirement": "two_dumbbells_must_be_verified_after_download",
+      "clean_form_claim": false
+    }
+  ]
+}
