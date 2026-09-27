@@ -43,7 +43,7 @@ class TrackingQualityGate(private val cameraDisturbanceThreshold:Double=.55,priv
         if(lastTimestamp!=null&&frame.timestampUs-lastTimestamp>cameraProfile.maxTrackingGapMs*1_000L){lastAcceptedTimestampUs=null;return paused(targetIndex,TrackingQualityReason.CONTINUITY_GAP)}
         val observedView=context.observedViewClass
         if(observedView!=null&&observedView !in cameraProfile.allowedViewClasses){lastAcceptedTimestampUs=null;return paused(targetIndex,TrackingQualityReason.WRONG_VIEW)}
-        val fill=frameFill(target)?:run{lastAcceptedTimestampUs=null;return paused(targetIndex,TrackingQualityReason.INSUFFICIENT_EVIDENCE)}
+        val fill=frameFill(target,cameraProfile)?:run{lastAcceptedTimestampUs=null;return paused(targetIndex,TrackingQualityReason.INSUFFICIENT_EVIDENCE)}
         if(fill !in cameraProfile.frameFillRange){lastAcceptedTimestampUs=null;return TrackingQualityResult(TrackingQualityState.PAUSED,TrackingQualityReason.FRAMING_INVALID,targetIndex,null,fill)}
         val required=cameraProfile.requiredLandmarks
         val presentCount=required.count{target.normalized(it.toLandmarkId())!=null}
@@ -57,7 +57,15 @@ class TrackingQualityGate(private val cameraDisturbanceThreshold:Double=.55,priv
         val degradedThreshold=(1.0-degradedMargin).coerceAtLeast(cameraProfile.minVisibleRequiredFraction)
         return if(fraction<degradedThreshold)TrackingQualityResult(TrackingQualityState.DEGRADED,TrackingQualityReason.LOW_LANDMARK_CONFIDENCE,targetIndex,fraction,fill) else TrackingQualityResult(TrackingQualityState.OBSERVABLE,TrackingQualityReason.OK,targetIndex,fraction,fill)
     }
-    private fun frameFill(target:PoseSubjectCandidate):Double?{val points=target.normalizedLandmarks.values.map{it.position};if(points.size<2)return null;val width=(points.maxOf{it.x}-points.minOf{it.x}).coerceAtLeast(0.0);val height=(points.maxOf{it.y}-points.minOf{it.y}).coerceAtLeast(0.0);return maxOf(width,height).coerceIn(0.0,1.0)}
+    private fun frameFill(target:PoseSubjectCandidate,cameraProfile:CameraProfile):Double?{
+        val points=cameraProfile.requiredLandmarks.mapNotNull{req->
+            target.normalized(req.toLandmarkId())?.position
+        }
+        if(points.size<2)return null
+        val width=(points.maxOf{it.x}-points.minOf{it.x}).coerceAtLeast(0.0)
+        val height=(points.maxOf{it.y}-points.minOf{it.y}).coerceAtLeast(0.0)
+        return maxOf(width,height).coerceIn(0.0,1.0)
+    }
     private fun paused(targetIndex:Int?,reason:TrackingQualityReason)=TrackingQualityResult(TrackingQualityState.PAUSED,reason,targetIndex,null,null)
     private fun unknown(reason:TrackingQualityReason)=TrackingQualityResult(TrackingQualityState.UNKNOWN,reason,null,null,null)
 }
