@@ -16,12 +16,13 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
     steps:
       - name: Checkout publisher input
         uses: actions/checkout@v4
         with:
           path: publisher-input
+          fetch-depth: 0
 
       - name: Checkout trusted publisher from main
         uses: actions/checkout@v4
@@ -33,9 +34,96 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Upload batch and verify CI
+      - name: Build publisher manifest from staged tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publisher-input/.publisher
+          python - <<'PY'
+          from __future__ import annotations
+          import base64
+          import json
+          from pathlib import Path
+          import subprocess
+
+          source = Path("publisher-input")
+          trusted = Path("publisher-main")
+          main_sha = subprocess.check_output(
+              ["git", "-C", str(trusted), "rev-parse", "HEAD"],
+              text=True,
+          ).strip()
+          rows = subprocess.check_output(
+              [
+                  "git", "-C", str(source), "diff", "--name-status",
+                  f"{main_sha}...HEAD",
+              ],
+              text=True,
+          ).splitlines()
+
+          excluded = {
+              ".github/workflows/python-upload.yml",
+          }
+          files = []
+          for row in rows:
+              if not row.strip():
+                  continue
+              parts = row.split("\t")
+              status = parts[0]
+              if status.startswith("D"):
+                  raise RuntimeError(
+                      f"publisher manifest does not support deletion: {row}"
+                  )
+              path = parts[-1]
+              if path in excluded or path.startswith(".publisher/"):
+                  continue
+              file_path = source / path
+              if not file_path.is_file():
+                  raise RuntimeError(f"not a regular file: {path}")
+              raw = file_path.read_bytes()
+              try:
+                  raw.decode("utf-8")
+              except UnicodeDecodeError as exc:
+                  raise RuntimeError(
+                      f"publisher batch only supports UTF-8 text: {path}"
+                  ) from exc
+              files.append(
+                  {
+                      "path": path,
+                      "content_base64": base64.b64encode(raw).decode("ascii"),
+                  }
+              )
+
+          if not files:
+              raise RuntimeError("no publishable files found")
+
+          manifest = {
+              "base": "main",
+              "branch": "integration/release-acceptance-complete",
+              "commit_message": (
+                  "Complete release software gates: directional setup guidance, "
+                  "tracking/identity safety, seeded fuzz, real-landmark replay, "
+                  "and commercial-gym harness evidence"
+              ),
+              "dispatch_workflows": [
+                  "android-ci.yml",
+                  "simulator-e2e.yml",
+              ],
+              "files": files,
+          }
+          out = source / ".publisher" / "generated-request.json"
+          out.write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(f"PUBLISHER_MANIFEST_MAIN={main_sha}")
+          print(f"PUBLISHER_MANIFEST_FILES={len(files)}")
+          for item in files:
+              print(f"PUBLISHER_FILE={item['path']}")
+          PY
+
+      - name: Upload batch and verify matching build and E2E
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           python publisher-main/tools/github_batch_upload.py
-          --manifest publisher-input/.publisher/request.json
+          --manifest publisher-input/.publisher/generated-request.json
