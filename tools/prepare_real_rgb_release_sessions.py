@@ -8,6 +8,7 @@ import math
 import shutil
 import subprocess
 import sys
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,11 +61,24 @@ def _download(spec: SourceSpec, cache: Path) -> Path:
     target = cache / f"{spec.exercise_id}.mp4"
     if target.exists() and target.stat().st_size > 0:
         return target
+    source_url = spec.source_url
+    lowered = source_url.lower().split("?", 1)[0]
+    if lowered.endswith((".mp4", ".webm", ".mov", ".m4v")):
+        request = urllib.request.Request(
+            source_url,
+            headers={"User-Agent": "GymBuddyReleaseEvidence/1.0 (+https://github.com/lazerta/gym-buddy)"},
+        )
+        with urllib.request.urlopen(request, timeout=120) as response, target.open("wb") as out:
+            shutil.copyfileobj(response, out, length=1024 * 1024)
+        if target.stat().st_size <= 0:
+            raise ValueError(f"direct media download was empty: {source_url}")
+        return target
+
     cmd = [
         sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-part",
         "--merge-output-format", "mp4", "-S", "res:720",
         "-o", str(target.with_suffix(".%(ext)s")), "--print", "after_move:filepath",
-        spec.source_url,
+        source_url,
     ]
     proc = subprocess.run(cmd, check=True, text=True, capture_output=True)
     candidates = [Path(x.strip()) for x in proc.stdout.splitlines() if x.strip()]
@@ -75,7 +89,7 @@ def _download(spec: SourceSpec, cache: Path) -> Path:
     if not target.exists():
         fallbacks = sorted(cache.glob(f"{spec.exercise_id}.*"))
         if not fallbacks:
-            raise FileNotFoundError(f"download produced no file for {spec.source_url}")
+            raise FileNotFoundError(f"download produced no file for {source_url}")
         target = fallbacks[0]
     return target
 
