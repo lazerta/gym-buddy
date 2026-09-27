@@ -1,6 +1,7 @@
 package com.gymbuddy.domain.movement
 
 import com.gymbuddy.domain.pose.PoseLandmarkId
+import com.gymbuddy.domain.profile.SignalCoordinateSpace
 import com.gymbuddy.domain.profile.SignalDefinition
 import com.gymbuddy.domain.profile.SignalKind
 import com.gymbuddy.domain.profile.SignalProfile
@@ -59,7 +60,11 @@ class MovementSignalExtractor {
 
     private fun extractSignal(timestampUs: Long, pose: NormalizedPose, definition: SignalDefinition): MovementSignalObservation {
         val ids = resolveLandmarks(definition) ?: return unknown(definition, SignalUnknownReason.INVALID_CONFIGURATION)
-        val landmarks = ids.map { pose.landmarks[it] }
+        val sourceLandmarks = when(definition.coordinateSpace) {
+            SignalCoordinateSpace.BODY_LOCAL_NORMALIZED -> pose.landmarks
+            SignalCoordinateSpace.BODY_LOCAL_WORLD -> pose.worldLandmarks
+        }
+        val landmarks = ids.map { sourceLandmarks[it] }
         if (landmarks.any { it == null }) return unknown(definition, SignalUnknownReason.MISSING_LANDMARK)
         val nonNull = landmarks.filterNotNull()
         val confidence = confidence(nonNull)
