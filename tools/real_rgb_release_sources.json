@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "exercise_id": "incline_dumbbell_press",
+      "source_url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-incline-bench-press.mp4",
+      "source_page": "https://github.com/luisaraujoc/free-exercise-db-api/blob/main/data/exercises.json",
+      "source_title": "Dumbbell Incline Bench Press",
+      "expected_view": "SIDE_OBLIQUE",
+      "equipment": "incline bench + dumbbells"
+    },
+    {
+      "exercise_id": "smith_machine_squat",
+      "source_url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/smith-chair-squat.mp4",
+      "source_page": "https://github.com/luisaraujoc/free-exercise-db-api/blob/main/data/exercises.json",
+      "source_title": "Smith Chair Squat (aliases: Smith Machine Squat, Smith Squat)",
+      "expected_view": "SIDE",
+      "equipment": "smith machine"
+    },
+    {
+      "exercise_id": "dumbbell_lateral_raise",
+      "source_url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-lateral-raise.mp4",
+      "source_page": "https://github.com/luisaraujoc/free-exercise-db-api/blob/main/data/exercises.json",
+      "source_title": "Dumbbell Lateral Raise",
+      "expected_view": "FRONT",
+      "equipment": "dumbbells"
+    }
+  ]
+}

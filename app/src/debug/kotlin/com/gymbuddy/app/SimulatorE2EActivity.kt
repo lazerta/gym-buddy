@@ -14,6 +14,7 @@ import com.gymbuddy.domain.pose.PoseFrame
 import com.gymbuddy.domain.profile.AnalysisConfigResolver
 import com.gymbuddy.domain.profiles.ExerciseBundle
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
+import com.gymbuddy.domain.tracking.TrackingObservationContext
 import com.gymbuddy.frames.FrameAnalysisLoop
 import com.gymbuddy.frames.FrameSource
 import com.gymbuddy.frames.SimulatorFrameSource
@@ -49,7 +50,17 @@ class SimulatorE2EActivity : ComponentActivity() {
             val bundle = InitialExerciseProfiles.resolveByExternalId(session.exerciseId)
                 ?: error("Unsupported exercise_id: ${session.exerciseId}")
             val runId = UUID.randomUUID().toString()
-            val activeAnalyzer = ProductionFrameAnalyzer(poseAnalyzer) { firstFrame -> processor(bundle, session.sessionId, runId, firstFrame) }
+            val activeAnalyzer = ProductionFrameAnalyzer(
+                poseAnalyzer = poseAnalyzer,
+                observationContextProvider = {
+                    TrackingObservationContext(
+                        observedViewClass = bundle.profile.cameraProfile.preferredViewClass,
+                    )
+                },
+                processorFactory = { firstFrame ->
+                    processor(bundle, session.sessionId, runId, firstFrame)
+                },
+            )
             analyzer = activeAnalyzer
             val activeSource = SimulatorFrameSource(transport, JpegMpImageDecoder(), realtimePacing = false)
             source = activeSource
