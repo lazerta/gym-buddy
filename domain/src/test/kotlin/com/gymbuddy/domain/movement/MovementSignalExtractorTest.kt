@@ -25,6 +25,65 @@ class MovementSignalExtractorTest {
         assertEquals(90.0, value.value!!, 1e-9)
     }
 
+
+    @Test fun worldCoordinateSignalUsesWorldLandmarkGeometry() {
+        val normalized = mapOf(
+            PoseLandmarkId.LEFT_SHOULDER to point(-1.0, 0.0),
+            PoseLandmarkId.LEFT_ELBOW to point(0.0, 0.0),
+            PoseLandmarkId.LEFT_WRIST to point(0.0, 1.0),
+        )
+        val world = mapOf(
+            PoseLandmarkId.LEFT_SHOULDER to point(-1.0, 0.0),
+            PoseLandmarkId.LEFT_ELBOW to point(0.0, 0.0),
+            PoseLandmarkId.LEFT_WRIST to point(-0.5, kotlin.math.sqrt(3.0) / 2.0),
+        )
+        val profile = SignalProfile("world-signals", 1, "world-hash", listOf(
+            SignalDefinition(
+                "elbow_angle_world",
+                SignalKind.JOINT_ANGLE,
+                SignalUnit.DEGREES,
+                setOf("left_shoulder", "left_elbow", "left_wrist"),
+                orderedLandmarkIds = listOf("left_shoulder", "left_elbow", "left_wrist"),
+                coordinateSpace = SignalCoordinateSpace.BODY_LOCAL_WORLD,
+            )
+        ))
+
+        val value = MovementSignalExtractor().extract(
+            0,
+            poseWithWorld(normalized, world),
+            profile,
+        ).values.getValue("elbow_angle_world")
+
+        assertEquals(60.0, value.value!!, 1e-9)
+    }
+
+    @Test fun worldCoordinateSignalDoesNotFallBackWhenWorldLandmarksAreMissing() {
+        val normalized = mapOf(
+            PoseLandmarkId.LEFT_SHOULDER to point(-1.0, 0.0),
+            PoseLandmarkId.LEFT_ELBOW to point(0.0, 0.0),
+            PoseLandmarkId.LEFT_WRIST to point(0.0, 1.0),
+        )
+        val profile = SignalProfile("world-signals", 1, "world-hash", listOf(
+            SignalDefinition(
+                "elbow_angle_world",
+                SignalKind.JOINT_ANGLE,
+                SignalUnit.DEGREES,
+                setOf("left_shoulder", "left_elbow", "left_wrist"),
+                orderedLandmarkIds = listOf("left_shoulder", "left_elbow", "left_wrist"),
+                coordinateSpace = SignalCoordinateSpace.BODY_LOCAL_WORLD,
+            )
+        ))
+
+        val value = MovementSignalExtractor().extract(
+            0,
+            poseWithWorld(normalized, emptyMap()),
+            profile,
+        ).values.getValue("elbow_angle_world")
+
+        assertNull(value.value)
+        assertEquals(SignalUnknownReason.MISSING_LANDMARK, value.unknownReason)
+    }
+
     @Test fun missingDataPropagatesUnknown() {
         val profile = displacementProfile("left_wrist", axis = 1.0)
         val value = MovementSignalExtractor().extract(0, pose(), profile).values.getValue("progress")
@@ -115,6 +174,21 @@ class MovementSignalExtractorTest {
     private fun point(x: Double, y: Double, confidence: Double = 0.9) = BodyLocalLandmark(
         PoseLandmarkId.LEFT_WRIST, x, y, 0.0, confidence, confidence
     )
+
+
+    private fun poseWithWorld(
+        normalized: Map<PoseLandmarkId, BodyLocalLandmark>,
+        world: Map<PoseLandmarkId, BodyLocalLandmark>,
+    ): NormalizedPose {
+        fun normalizeIds(source: Map<PoseLandmarkId, BodyLocalLandmark>) =
+            source.mapValues { (id, landmark) -> landmark.copy(landmarkId = id) }
+        return NormalizedPose(
+            candidateIndex = 0,
+            bodyScale = 1.0,
+            landmarks = normalizeIds(normalized),
+            worldLandmarks = normalizeIds(world),
+        )
+    }
 
     private fun pose(vararg entries: Pair<PoseLandmarkId, BodyLocalLandmark>): NormalizedPose {
         val map = entries.associate { (id, landmark) -> id to landmark.copy(landmarkId = id) }
