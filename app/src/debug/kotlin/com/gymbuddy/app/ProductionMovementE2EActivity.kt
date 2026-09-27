@@ -12,6 +12,7 @@ import com.gymbuddy.domain.pose.PoseLandmarkObservation
 import com.gymbuddy.domain.pose.PoseSubjectCandidate
 import com.gymbuddy.domain.profile.AnalysisConfigResolver
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
+import com.gymbuddy.domain.tracking.TrackingObservationContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -69,7 +70,10 @@ class ProductionMovementE2EActivity : ComponentActivity() {
                             height = 480,
                             source = PoseFrameSource.VIDEO,
                             candidates = listOf(candidateFor(bundle.definition.exerciseId, angle)),
-                        )
+                        ),
+                        TrackingObservationContext(
+                            observedViewClass=bundle.profile.cameraProfile.preferredViewClass,
+                        ),
                     )
                     if (result.movement.signals?.values?.values?.all { it.isKnown } == true) {
                         knownSignalFrames += 1
@@ -109,10 +113,13 @@ class ProductionMovementE2EActivity : ComponentActivity() {
 
     private fun candidateFor(exerciseId: String, angle: Double): PoseSubjectCandidate {
         val front = exerciseId == "dumbbell_lateral_raise"
-        val ls = if (front) point(.40, .30) else point(.49, .30)
-        val rs = if (front) point(.60, .30) else point(.51, .30)
-        val lh = if (front) point(.43, .60) else point(.49, .60)
-        val rh = if (front) point(.57, .60) else point(.51, .60)
+        val press = exerciseId == "incline_dumbbell_press"
+        val shoulderY = when { front -> .20; press -> .25; else -> .20 }
+        val hipY = when { front -> .80; press -> .70; else -> .60 }
+        val ls = if (front) point(.40, shoulderY) else point(.49, shoulderY)
+        val rs = if (front) point(.60, shoulderY) else point(.51, shoulderY)
+        val lh = if (front) point(.43, hipY) else point(.49, hipY)
+        val rh = if (front) point(.57, hipY) else point(.51, hipY)
         val points = mutableMapOf(
             PoseLandmarkId.LEFT_SHOULDER to ls,
             PoseLandmarkId.RIGHT_SHOULDER to rs,
@@ -129,8 +136,8 @@ class ProductionMovementE2EActivity : ComponentActivity() {
                 points[PoseLandmarkId.RIGHT_WRIST] = rotatePoint(re, rs, -angle, .12)
             }
             "smith_machine_squat" -> {
-                val lk = point(lh[0] - .015, .72)
-                val rk = point(rh[0] + .015, .72)
+                val lk = point(lh[0] - .015, .78)
+                val rk = point(rh[0] + .015, .78)
                 points[PoseLandmarkId.LEFT_KNEE] = lk
                 points[PoseLandmarkId.RIGHT_KNEE] = rk
                 points[PoseLandmarkId.LEFT_ANKLE] = rotatePoint(lk, lh, angle, .15)
