@@ -28,10 +28,23 @@ jobs:
           ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
           path: harness-src
 
+      - name: Checkout WorkoutVision real-human landmark fixture
+        uses: actions/checkout@v4
+        with:
+          repository: david-dabert/workout-vision
+          ref: 285977080e2b7eec01d1fde0a03e976db25a5926
+          path: workoutvision-src
+          sparse-checkout: |
+            test/real-phone/landmarks/lateral_raise_10_front_mufhhbun.json.gz
+            test/real-phone/landmarks/manifest.json
+            test/real-phone/step3/webkit-iphone-lateral_raise.json
+          sparse-checkout-cone-mode: false
+
       - name: Install harness server
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ./harness-src
+          python -m pip install pytest
 
       - name: Generate harness temporal contracts
         run: >-
@@ -63,34 +76,59 @@ jobs:
           --harness-root harness-src
           --output build/harness-contracts/fuzz-safety-contracts.tsv
 
-      - name: Prepare deterministic frame session
+      - name: Generate WorkoutVision real-human landmark contract
+        run: >-
+          python tools/generate_workoutvision_lateral_raise_contract.py
+          --input workoutvision-src/test/real-phone/landmarks/lateral_raise_10_front_mufhhbun.json.gz
+          --output build/harness-contracts/workoutvision-lateral-raise.tsv
+
+      - name: Prepare harness-rendered RGB frame session
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y ffmpeg curl
-          mkdir -p e2e-session/frames e2e-session/ground_truth
+          mkdir -p e2e-session/frames e2e-session/ground_truth build/harness-video
 
-          ffmpeg -hide_banner -loglevel error -y \
-            -f lavfi -i color=c=black:s=640x480:r=30:d=0.2 \
-            -frames:v 1 e2e-session/frames/000000.jpg
+          python - <<'PY'
+          from pathlib import Path
+          import cv2
+          import numpy as np
+          from harness.render import render_demo
 
-          cp e2e-session/frames/000000.jpg e2e-session/frames/000001.jpg
-          cp e2e-session/frames/000000.jpg e2e-session/frames/000002.jpg
+          video_path = render_demo(Path("build/harness-video/demo.mp4"), frames=90)
+          capture = cv2.VideoCapture(str(video_path))
+          wanted = {0: "000000.jpg", 30: "000001.jpg", 60: "000002.jpg"}
+          seen = {}
+          frame_index = 0
+          while True:
+              ok, frame = capture.read()
+              if not ok:
+                  break
+              if frame_index in wanted:
+                  path = Path("e2e-session/frames") / wanted[frame_index]
+                  assert cv2.imwrite(str(path), frame)
+                  seen[frame_index] = float(np.std(frame))
+              frame_index += 1
+          capture.release()
+          assert set(seen) == set(wanted), seen
+          assert all(value > 5.0 for value in seen.values()), seen
+          print(f"HARNESS_RENDERED_RGB_VIDEO_PASS frames={frame_index} sampled_std={seen}")
+          PY
 
           python - <<'PY'
           import json
           from pathlib import Path
 
           root = Path("e2e-session")
-          timestamps = [0, 33333, 66667]
+          timestamps = [0, 1000000, 2000000]
           frames = []
 
           for i, ts in enumerate(timestamps):
               gt = {
                   "schema_version": 1,
                   "session_id": "android-e2e",
-                  "exercise_id": "smith_squat",
+                  "exercise_id": "incline_dumbbell_press",
                   "frame_id": i,
                   "timestamp_us": ts,
                   "expected_transport": True,
@@ -111,11 +149,11 @@ jobs:
           manifest = {
               "schema_version": 1,
               "session_id": "android-e2e",
-              "exercise_id": "smith_squat",
+              "exercise_id": "incline_dumbbell_press",
               "fps": 30.0,
               "width": 640,
               "height": 480,
-              "source": "github-actions-fixture",
+              "source": "harness-rendered-rgb",
               "frames": frames,
           }
           (root / "manifest.json").write_text(
@@ -123,6 +161,22 @@ jobs:
               encoding="utf-8",
           )
           PY
+
+      - name: Harness simulated commercial-gym and video plumbing gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q \
+            harness-src/tests/test_temporal_rep.py::test_episode_background_people_and_spotter_do_not_create_wrong_lock_or_false_rep \
+            harness-src/tests/test_temporal_rep.py::test_episode_lookalike_never_silently_becomes_primary_subject \
+            harness-src/tests/test_temporal_rep.py::test_episode_reidentify_after_occlusion_is_safe \
+            harness-src/tests/test_temporal_rep.py::test_episode_external_smoke_matrix_passes \
+            harness-src/tests/test_temporal_rep.py::test_trainer_demonstration_does_not_create_false_reps \
+            harness-src/tests/test_temporal_rep.py::test_trainer_assisted_finish_is_classified \
+            harness-src/tests/test_temporal_rep.py::test_trainer_edge_rep_set_rejects_partial_and_failed_attempts \
+            harness-src/tests/test_url_ingestion_live.py \
+            harness-src/tests/test_mujoco_frame_export.py \
+            harness-src/tests/test_wham_video_pipeline.py
 
       - name: Start harness frame server
         shell: bash
@@ -196,6 +250,14 @@ jobs:
           --tests com.gymbuddy.domain.movement.TemporalRepSeededFuzzTest
           --stacktrace
 
+      - name: WorkoutVision real-human lateral-raise landmark replay
+        env:
+          GYM_BUDDY_WORKOUTVISION_LATERAL_RAISE_FIXTURE: ${{ github.workspace }}/build/harness-contracts/workoutvision-lateral-raise.tsv
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.integration.WorkoutVisionRealHumanLateralRaiseReplayTest
+          --stacktrace
+
       - name: Production movement vertical-slice gate
         run: >-
           gradle :domain:test
@@ -260,7 +322,7 @@ jobs:
           results = json.loads(Path("e2e-results.json").read_text())
           assert len(results) == 3, results
 
-          expected_ts = [0, 33333, 66667]
+          expected_ts = [0, 1000000, 2000000]
           production_keys = {
               "tracking_state",
               "tracking_reason",
@@ -304,4 +366,6 @@ jobs:
             postmerge-integration-e2e.json
             runtime-boundary-e2e.json
             frame-server.log
+            build/harness-contracts/workoutvision-lateral-raise.tsv
+            build/harness-video/demo.mp4
           if-no-files-found: ignore
