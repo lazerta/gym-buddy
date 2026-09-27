@@ -42,11 +42,24 @@ class ProductionControlRegressionTest {
         val bundle = InitialExerciseProfiles.dumbbellLateralRaise
         val pipeline = ProductionMovementPipeline(AnalysisConfigResolver.resolve(bundle.definition, bundle.profile, bundle.equipment))
         val wrong = PoseFrame(0, 0, 640, 480, PoseFrameSource.CAMERA, listOf(candidate(front = false)))
-        assertEquals(TrackingQualityReason.CAMERA_NOT_READY, pipeline.process(wrong).tracking.reason)
+        assertEquals(
+            TrackingQualityReason.CAMERA_NOT_READY,
+            pipeline.process(
+                wrong,
+                TrackingObservationContext(observedViewClass=ViewClass.REAR),
+            ).tracking.reason,
+        )
 
         pipeline.reset()
-        val ready1 = pipeline.process(PoseFrame(0, 0, 640, 480, PoseFrameSource.CAMERA, listOf(candidate(front = true))))
-        val ready2 = pipeline.process(PoseFrame(1, 100_000, 640, 480, PoseFrameSource.CAMERA, listOf(candidate(front = true))))
+        val frontContext=TrackingObservationContext(observedViewClass=ViewClass.FRONT)
+        val ready1 = pipeline.process(
+            PoseFrame(0, 0, 640, 480, PoseFrameSource.CAMERA, listOf(candidate(front = true))),
+            frontContext,
+        )
+        val ready2 = pipeline.process(
+            PoseFrame(1, 100_000, 640, 480, PoseFrameSource.CAMERA, listOf(candidate(front = true))),
+            frontContext,
+        )
         assertEquals(CameraGuidanceAction.CANNOT_ASSESS, ready1.cameraGuidance)
         assertEquals(CameraGuidanceAction.CAMERA_READY, ready2.cameraGuidance)
         assertNotEquals(SetLifecycleState.CAMERA_GUIDANCE, ready2.lifecycleState)
@@ -76,21 +89,23 @@ class ProductionControlRegressionTest {
     }
 
     @Test fun viewEstimatorDoesNotGuessFrontWithoutFaceEvidence() {
-        val noFace = PoseViewEstimator().estimate(candidate(front = false, wide = true))
+        val noFace = PoseViewEstimator().estimate(candidate(front = false, wide = true, releaseFraming = false))
         assertTrue(noFace == ViewClass.REAR || noFace == ViewClass.REAR_OBLIQUE)
-        val withFace = PoseViewEstimator().estimate(candidate(front = true, wide = true))
+        val withFace = PoseViewEstimator().estimate(candidate(front = true, wide = true, releaseFraming = false))
         assertTrue(withFace == ViewClass.FRONT || withFace == ViewClass.FRONT_OBLIQUE)
     }
 
-    private fun candidate(front: Boolean, wide: Boolean = front): PoseSubjectCandidate {
+    private fun candidate(front: Boolean, wide: Boolean = front, releaseFraming:Boolean = true): PoseSubjectCandidate {
         val shoulderWidth = if (wide) .18 else .04
         val hipWidth = if (wide) .14 else .03
+        val shoulderY=if(releaseFraming).20 else .30
+        val hipY=if(releaseFraming).80 else .55
         fun lm(id: PoseLandmarkId, x: Double, y: Double) = PoseLandmarkObservation(id, PoseCoordinate3d(x, y, 0.0), .95, .95)
         val map = mutableMapOf(
-            PoseLandmarkId.LEFT_SHOULDER to lm(PoseLandmarkId.LEFT_SHOULDER, .5 - shoulderWidth / 2, .3),
-            PoseLandmarkId.RIGHT_SHOULDER to lm(PoseLandmarkId.RIGHT_SHOULDER, .5 + shoulderWidth / 2, .3),
-            PoseLandmarkId.LEFT_HIP to lm(PoseLandmarkId.LEFT_HIP, .5 - hipWidth / 2, .55),
-            PoseLandmarkId.RIGHT_HIP to lm(PoseLandmarkId.RIGHT_HIP, .5 + hipWidth / 2, .55),
+            PoseLandmarkId.LEFT_SHOULDER to lm(PoseLandmarkId.LEFT_SHOULDER, .5 - shoulderWidth / 2, shoulderY),
+            PoseLandmarkId.RIGHT_SHOULDER to lm(PoseLandmarkId.RIGHT_SHOULDER, .5 + shoulderWidth / 2, shoulderY),
+            PoseLandmarkId.LEFT_HIP to lm(PoseLandmarkId.LEFT_HIP, .5 - hipWidth / 2, hipY),
+            PoseLandmarkId.RIGHT_HIP to lm(PoseLandmarkId.RIGHT_HIP, .5 + hipWidth / 2, hipY),
             PoseLandmarkId.LEFT_ELBOW to lm(PoseLandmarkId.LEFT_ELBOW, .35, .35),
             PoseLandmarkId.RIGHT_ELBOW to lm(PoseLandmarkId.RIGHT_ELBOW, .65, .35),
             PoseLandmarkId.LEFT_WRIST to lm(PoseLandmarkId.LEFT_WRIST, .25, .4),
