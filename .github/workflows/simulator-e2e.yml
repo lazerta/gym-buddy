@@ -28,10 +28,22 @@ jobs:
           ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
           path: harness-src
 
+      - name: Checkout WorkoutVision real-landmark source
+        uses: actions/checkout@v4
+        with:
+          repository: david-dabert/workout-vision
+          ref: 285977080e2b7eec01d1fde0a03e976db25a5926
+          path: workoutvision-src
+
       - name: Install harness server
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ./harness-src
+
+      - name: Harness commercial-gym simulation gate
+        run: >-
+          python tools/run_harness_commercial_gym_gate.py
+          --output build/harness-contracts/commercial-gym-summary.json
 
       - name: Generate harness temporal contracts
         run: >-
@@ -62,6 +74,12 @@ jobs:
           python tools/generate_harness_fuzz_safety_contracts.py
           --harness-root harness-src
           --output build/harness-contracts/fuzz-safety-contracts.tsv
+
+      - name: Generate WorkoutVision real-phone landmark replay fixture
+        run: >-
+          python tools/generate_workoutvision_real_landmark_fixture.py
+          --workout-vision-root workoutvision-src
+          --output build/harness-contracts/workoutvision-real-landmark.tsv
 
       - name: Prepare deterministic frame session
         shell: bash
@@ -155,6 +173,14 @@ jobs:
         run: >-
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.HarnessTemporalContractTest
+          --stacktrace
+
+      - name: Real-phone landmark replay gate
+        env:
+          GYM_BUDDY_WORKOUTVISION_REAL_LANDMARK_FIXTURE: ${{ github.workspace }}/build/harness-contracts/workoutvision-real-landmark.tsv
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.integration.WorkoutVisionRealLandmarkReplayTest
           --stacktrace
 
       - name: Harness-derived camera/tracking contract gate
@@ -303,5 +329,7 @@ jobs:
             app/build/reports/androidTests/
             postmerge-integration-e2e.json
             runtime-boundary-e2e.json
+            build/harness-contracts/commercial-gym-summary.json
+            build/harness-contracts/workoutvision-real-landmark.tsv
             frame-server.log
           if-no-files-found: ignore
