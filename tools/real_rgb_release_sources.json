@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "exercise_id": "incline_dumbbell_press",
+      "source_url": "https://vimeo.com/1141627841",
+      "source_page": "https://vimeo.com/1141627841",
+      "source_title": "Incline Dumbbell Press",
+      "expected_view": "SIDE_OBLIQUE",
+      "equipment": "incline bench + dumbbells"
+    },
+    {
+      "exercise_id": "smith_machine_squat",
+      "source_url": "https://vimeo.com/84100138",
+      "source_page": "https://vimeo.com/84100138",
+      "source_title": "Smith Machine Squat",
+      "expected_view": "SIDE",
+      "equipment": "smith machine"
+    },
+    {
+      "exercise_id": "dumbbell_lateral_raise",
+      "source_url": "https://vimeo.com/1138246525",
+      "source_page": "https://vimeo.com/1138246525",
+      "source_title": "Dumbbell Lateral Raise",
+      "expected_view": "FRONT",
+      "equipment": "dumbbells"
+    }
+  ]
+}
