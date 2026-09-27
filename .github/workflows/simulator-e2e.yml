@@ -57,6 +57,12 @@ jobs:
           --harness-root harness-src
           --output build/harness-contracts/form-cue-contracts.tsv
 
+      - name: Generate harness composite fuzz safety contracts
+        run: >-
+          python tools/generate_harness_fuzz_safety_contracts.py
+          --harness-root harness-src
+          --output build/harness-contracts/fuzz-safety-contracts.tsv
+
       - name: Prepare deterministic frame session
         shell: bash
         run: |
@@ -158,6 +164,7 @@ jobs:
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.HarnessCameraTrackingContractTest
           --stacktrace
+          --info
 
       - name: Harness-derived primary-subject-lock contract gate
         env:
@@ -173,6 +180,20 @@ jobs:
         run: >-
           gradle :domain:test
           --tests com.gymbuddy.domain.integration.HarnessFormCueContractTest
+          --stacktrace
+
+      - name: Harness-derived composite fuzz safety gate
+        env:
+          GYM_BUDDY_HARNESS_FUZZ_SAFETY_FIXTURE: ${{ github.workspace }}/build/harness-contracts/fuzz-safety-contracts.tsv
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.integration.HarnessFuzzSafetyContractTest
+          --stacktrace
+
+      - name: Seeded temporal movement safety fuzz
+        run: >-
+          gradle :domain:test
+          --tests com.gymbuddy.domain.movement.TemporalRepSeededFuzzTest
           --stacktrace
 
       - name: Production movement vertical-slice gate

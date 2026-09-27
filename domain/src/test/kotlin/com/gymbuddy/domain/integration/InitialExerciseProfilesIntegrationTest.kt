@@ -85,7 +85,10 @@ class InitialExerciseProfilesIntegrationTest {
                 1_000_000L to mid,
                 1_250_000L to startAngle,
             ).forEachIndexed { index, (ts, angle) ->
-                val result = pipeline.process(PoseFrame(index.toLong(), ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))))
+                val result = pipeline.process(
+                    PoseFrame(index.toLong(), ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))),
+                    TrackingObservationContext(observedViewClass=bundle.profile.cameraProfile.preferredViewClass),
+                )
                 completed += result.movement.repEvidence.size
             }
             assertEquals("${bundle.definition.exerciseId} production pipeline rep count", 1, completed)
@@ -101,7 +104,10 @@ class InitialExerciseProfilesIntegrationTest {
         fun process(ts:Long, angle:Double, cameraMotionScore:Double?=null) =
             pipeline.process(
                 PoseFrame(ts, ts, 640, 480, PoseFrameSource.VIDEO, listOf(candidateFor(bundle.definition.exerciseId, angle))),
-                TrackingObservationContext(cameraMotionScore=cameraMotionScore),
+                TrackingObservationContext(
+                    observedViewClass=bundle.profile.cameraProfile.preferredViewClass,
+                    cameraMotionScore=cameraMotionScore,
+                ),
             ).also { completed += it.movement.repEvidence.size }
 
         process(0,20.0)
@@ -132,10 +138,13 @@ class InitialExerciseProfilesIntegrationTest {
 
     private fun candidateFor(exerciseId: String, angle: Double): PoseSubjectCandidate {
         val front = exerciseId == "dumbbell_lateral_raise"
-        val ls = if (front) doubleArrayOf(.40, .30) else doubleArrayOf(.49, .30)
-        val rs = if (front) doubleArrayOf(.60, .30) else doubleArrayOf(.51, .30)
-        val lh = if (front) doubleArrayOf(.43, .60) else doubleArrayOf(.49, .60)
-        val rh = if (front) doubleArrayOf(.57, .60) else doubleArrayOf(.51, .60)
+        val press = exerciseId == "incline_dumbbell_press"
+        val shoulderY = when { front -> .20; press -> .25; else -> .20 }
+        val hipY = when { front -> .80; press -> .70; else -> .60 }
+        val ls = if (front) doubleArrayOf(.40, shoulderY) else doubleArrayOf(.49, shoulderY)
+        val rs = if (front) doubleArrayOf(.60, shoulderY) else doubleArrayOf(.51, shoulderY)
+        val lh = if (front) doubleArrayOf(.43, hipY) else doubleArrayOf(.49, hipY)
+        val rh = if (front) doubleArrayOf(.57, hipY) else doubleArrayOf(.51, hipY)
         fun obs(id: PoseLandmarkId, p: DoubleArray) = PoseLandmarkObservation(id, PoseCoordinate3d(p[0], p[1], 0.0), .95, .95)
         fun rotatePoint(vertex: DoubleArray, reference: DoubleArray, degrees: Double, length: Double): DoubleArray {
             val vx = reference[0] - vertex[0]
@@ -160,8 +169,8 @@ class InitialExerciseProfilesIntegrationTest {
                 points[PoseLandmarkId.RIGHT_WRIST] = rotatePoint(re, rs, -angle, .12)
             }
             "smith_machine_squat" -> {
-                val lk = doubleArrayOf(lh[0] - .015, .72)
-                val rk = doubleArrayOf(rh[0] + .015, .72)
+                val lk = doubleArrayOf(lh[0] - .015, .78)
+                val rk = doubleArrayOf(rh[0] + .015, .78)
                 points[PoseLandmarkId.LEFT_KNEE] = lk
                 points[PoseLandmarkId.RIGHT_KNEE] = rk
                 points[PoseLandmarkId.LEFT_ANKLE] = rotatePoint(lk, lh, angle, .15)

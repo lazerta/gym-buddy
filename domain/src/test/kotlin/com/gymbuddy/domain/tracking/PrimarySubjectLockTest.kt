@@ -79,6 +79,28 @@ class PrimarySubjectLockTest {
         assertNull(swap.targetCandidateIndex)
     }
 
+    @Test fun scaleDiscontinuousReplacementCannotReacquireAfterOcclusion() {
+        val lock = PrimarySubjectLock()
+        lock.update(frame(0, person(0, 0.46, 0.50, 1.0)))
+        assertEquals(
+            PrimarySubjectLockState.TEMPORARILY_OCCLUDED,
+            lock.update(frame(200_000)).state,
+        )
+        repeat(6) { step ->
+            val result = lock.update(
+                frame(
+                    300_000L + step * 120_000L,
+                    person(1, 0.46, 0.50, 1.45, posePhase = .4),
+                )
+            )
+            assertNotEquals(
+                "scale-discontinuous replacement must not become target at step $step",
+                PrimarySubjectLockState.LOCKED,
+                result.state,
+            )
+        }
+    }
+
     @Test fun competingSimilarCandidateWithLowMarginBecomesAmbiguous() {
         val lock = PrimarySubjectLock()
         lock.update(frame(0, person(0, 0.50, 0.50, 1.0)))
