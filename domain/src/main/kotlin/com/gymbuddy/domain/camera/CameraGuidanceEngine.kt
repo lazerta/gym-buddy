@@ -46,11 +46,28 @@ class CameraGuidanceEngine(
         }
         if(reliable.toDouble()/profile.requiredLandmarks.size<profile.minVisibleRequiredFraction)return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
 
-        val points=target.normalizedLandmarks.values.map{it.position}
+        val points=observations.map{(_,landmark)->landmark.position}
         if(points.size<2)return notReady(profile,CameraGuidanceAction.CANNOT_ASSESS)
-        val fill=maxOf(points.maxOf{it.x}-points.minOf{it.x},points.maxOf{it.y}-points.minOf{it.y})
-        if(fill<profile.frameFillRange.min)return notReady(profile,CameraGuidanceAction.MOVE_CLOSER)
-        if(fill>profile.frameFillRange.max)return notReady(profile,CameraGuidanceAction.MOVE_FARTHER)
+        val minX=points.minOf{it.x};val maxX=points.maxOf{it.x}
+        val minY=points.minOf{it.y};val maxY=points.maxOf{it.y}
+        val fill=maxOf(maxX-minX,maxY-minY)
+        if(fill<profile.guidanceFrameFillRange.min)return notReady(profile,CameraGuidanceAction.MOVE_CLOSER)
+        if(fill>profile.guidanceFrameFillRange.max)return notReady(profile,CameraGuidanceAction.MOVE_FARTHER)
+
+        val centerX=(minX+maxX)/2.0
+        val centerY=(minY+maxY)/2.0
+        val horizontalViolation=outsideDistance(centerX,profile.subjectCenterXRange)
+        val verticalViolation=outsideDistance(centerY,profile.subjectCenterYRange)
+        if(horizontalViolation>0.0||verticalViolation>0.0){
+            val action=if(horizontalViolation>=verticalViolation){
+                if(centerX<profile.subjectCenterXRange.min)CameraGuidanceAction.MOVE_LEFT
+                else CameraGuidanceAction.MOVE_RIGHT
+            }else{
+                if(centerY<profile.subjectCenterYRange.min)CameraGuidanceAction.RAISE_CAMERA
+                else CameraGuidanceAction.LOWER_CAMERA
+            }
+            return notReady(profile,action)
+        }
 
         if(lastTargetIndex!=targetIndex){consecutiveReadyFrames=0;lastTargetIndex=targetIndex}
         consecutiveReadyFrames++
@@ -62,6 +79,12 @@ class CameraGuidanceEngine(
             readyDwellFrames
         }
         return if(consecutiveReadyFrames>=requiredDwell)CameraGuidanceAction.CAMERA_READY else CameraGuidanceAction.CANNOT_ASSESS
+    }
+
+    private fun outsideDistance(value:Double,range:com.gymbuddy.domain.profile.NumericRange)=when{
+        value<range.min->range.min-value
+        value>range.max->value-range.max
+        else->0.0
     }
 
     private fun notReady(profile:CameraProfile,action:CameraGuidanceAction):CameraGuidanceAction {

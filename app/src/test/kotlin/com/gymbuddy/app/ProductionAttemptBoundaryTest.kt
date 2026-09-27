@@ -99,10 +99,10 @@ class ProductionAttemptBoundaryTest {
     companion object {
         private fun candidate(leftAngle:Double,rightAngle:Double):PoseSubjectCandidate {
             val points=mutableMapOf(
-                PoseLandmarkId.LEFT_SHOULDER to doubleArrayOf(.4,.3),
-                PoseLandmarkId.RIGHT_SHOULDER to doubleArrayOf(.6,.3),
-                PoseLandmarkId.LEFT_HIP to doubleArrayOf(.43,.6),
-                PoseLandmarkId.RIGHT_HIP to doubleArrayOf(.57,.6),
+                PoseLandmarkId.LEFT_SHOULDER to doubleArrayOf(.4,.20),
+                PoseLandmarkId.RIGHT_SHOULDER to doubleArrayOf(.6,.20),
+                PoseLandmarkId.LEFT_HIP to doubleArrayOf(.43,.80),
+                PoseLandmarkId.RIGHT_HIP to doubleArrayOf(.57,.80),
                 PoseLandmarkId.NOSE to doubleArrayOf(.5,.2),
                 PoseLandmarkId.LEFT_EYE to doubleArrayOf(.48,.19),
                 PoseLandmarkId.RIGHT_EYE to doubleArrayOf(.52,.19),

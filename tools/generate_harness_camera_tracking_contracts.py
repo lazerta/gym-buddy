@@ -14,17 +14,30 @@ APP_TO_HARNESS = {
     "dumbbell_lateral_raise": "lateral_raise",
 }
 
+# Every canonical scenario family whose expected behavior can be expressed through
+# the camera/tracking boundary. Identity-ambiguity families are exercised by the
+# dedicated PrimarySubjectLock contract gate instead of faking a strong lock here.
 SELECTED_FAMILIES = (
     "clean",
+    "setup_motion",
     "wrong_view",
     "too_close",
+    "too_far",
+    "camera_low",
+    "camera_high",
     "camera_bump",
+    "bystander_cross",
     "bystander_bg",
     "spotter",
     "foreground_occlusion",
+    "mirror_known",
     "motion_blur",
     "low_light",
     "tracking_gap",
+    "single_issue",
+    "repeated_issue",
+    "short_rom",
+    "asymmetry",
     "target_exit_reenter",
 )
 
