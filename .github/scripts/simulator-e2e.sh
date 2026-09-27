@@ -96,3 +96,20 @@ gradle :app:connectedDebugAndroidTest --stacktrace
 
 # Require per-test execution evidence even if Gradle reports zero tests.
 bash tools/step3_instrumentation_e2e.sh
+
+# Blocking G2/G3 evidence: real prerecorded RGB is independently segmented by
+# image-space optical flow, then every frame goes through the same Android
+# MediaPipe + production movement path used above. G3 composes this with the
+# already-generated commercial-gym component and deterministic degraded/gap
+# sessions; no physical-device run is required by the canonical gate.
+python tools/prepare_real_rgb_release_sessions.py \
+  --sources tools/real_rgb_release_sources.json \
+  --output-root build/real-rgb-sessions \
+  --cache build/real-rgb-cache \
+  --fps 10 \
+  --include-g3
+bash tools/real_rgb_emulator_gate.sh
+python tools/verify_integrated_g3_gate.py \
+  --commercial-gym build/harness-contracts/commercial-gym-summary.json \
+  --real-rgb build/real-rgb-results/real-rgb-verification.json \
+  --output build/harness-contracts/g3-integrated-summary.json
