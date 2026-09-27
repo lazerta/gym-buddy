@@ -35,7 +35,7 @@ class HarnessCameraTrackingContractTest {
 
         val fixture=loadFixture(File(requireNotNull(fixturePath)))
         assertEquals(EXPECTED_HARNESS_COMMIT,fixture.harnessCommit)
-        assertEquals(33,fixture.cases.size)
+        assertEquals(63,fixture.cases.size)
 
         fixture.cases.forEach { contract ->
             val profile=requireNotNull(
@@ -50,6 +50,7 @@ class HarnessCameraTrackingContractTest {
                 visibleRequiredFraction=contract.visibleRequiredFraction,
                 trackingQuality=contract.trackingQuality,
                 candidateIndex=0,
+                centerY=cameraCenterY(contract),
             )
             val candidates=buildList {
                 add(target)
@@ -129,17 +130,18 @@ class HarnessCameraTrackingContractTest {
                 )
             }
 
-            val expectedTracking=expectedTracking(contract)
-            assertEquals(
-                "${contract.key} from harness ${fixture.harnessCommit}",
-                expectedTracking.first,
-                tracking.state,
-            )
-            assertEquals(
-                "${contract.key} from harness ${fixture.harnessCommit}",
-                expectedTracking.second,
-                tracking.reason,
-            )
+            expectedTracking(contract)?.let { expectedTracking ->
+                assertEquals(
+                    "${contract.key} from harness ${fixture.harnessCommit}",
+                    expectedTracking.first,
+                    tracking.state,
+                )
+                assertEquals(
+                    "${contract.key} from harness ${fixture.harnessCommit}",
+                    expectedTracking.second,
+                    tracking.reason,
+                )
+            }
 
             expectedGuidance(contract)?.let { expected ->
                 val guidance=CameraGuidanceEngine(
@@ -164,9 +166,9 @@ class HarnessCameraTrackingContractTest {
 
     private fun expectedTracking(
         contract:Contract,
-    ):Pair<TrackingQualityState,TrackingQualityReason> =
+    ):Pair<TrackingQualityState,TrackingQualityReason>? =
         when(contract.oracleReason) {
-            "clean" ->
+            "clean","setup_motion","persistent_issue","isolated_issue" ->
                 TrackingQualityState.OBSERVABLE to
                     TrackingQualityReason.OK
 
@@ -174,9 +176,8 @@ class HarnessCameraTrackingContractTest {
                 "wrong_view" ->
                     TrackingQualityState.PAUSED to
                         TrackingQualityReason.WRONG_VIEW
-                "too_close" ->
-                    TrackingQualityState.PAUSED to
-                        TrackingQualityReason.FRAMING_INVALID
+                "too_close","too_far",
+                "camera_low","camera_high" -> null
                 else -> error(
                     "Unsupported camera-guidance harness family: " +
                         contract.family
@@ -205,16 +206,26 @@ class HarnessCameraTrackingContractTest {
         contract:Contract,
     ):CameraGuidanceAction? =
         when(contract.oracleReason) {
-            "clean" -> CameraGuidanceAction.CAMERA_READY
+            "clean","setup_motion","persistent_issue","isolated_issue" ->
+                CameraGuidanceAction.CAMERA_READY
             "camera_guidance" -> when(contract.family) {
                 "wrong_view" -> CameraGuidanceAction.ADJUST_ANGLE
                 "too_close" -> CameraGuidanceAction.MOVE_FARTHER
+                "too_far" -> CameraGuidanceAction.MOVE_CLOSER
+                "camera_low" -> CameraGuidanceAction.RAISE_CAMERA
+                "camera_high" -> CameraGuidanceAction.LOWER_CAMERA
                 else -> null
             }
             "target_observation_low" ->
                 CameraGuidanceAction.CANNOT_ASSESS
             else -> null
         }
+
+    private fun cameraCenterY(contract:Contract)=when(contract.family){
+        "camera_low"->.28
+        "camera_high"->.72
+        else->.5
+    }
 
     private fun observedView(
         profile:CameraProfile,
@@ -234,20 +245,22 @@ class HarnessCameraTrackingContractTest {
         visibleRequiredFraction:Double,
         trackingQuality:Double,
         candidateIndex:Int,
+        centerY:Double=.5,
     ):PoseSubjectCandidate {
         val span=fill.coerceIn(0.0,1.0)
-        val half=span/2.0
-        val left=.5-half
-        val right=.5+half
-        val top=.5-half
-        val bottom=.5+half
+        val horizontalHalf=span/2.0
+        val verticalHalf=minOf(span,.50)/2.0
+        val left=.5-horizontalHalf
+        val right=.5+horizontalHalf
+        val top=centerY-verticalHalf
+        val bottom=centerY+verticalHalf
         val coordinates=listOf(
             left to top,
             right to top,
             left to bottom,
             right to bottom,
-            left to .5,
-            right to .5,
+            left to centerY,
+            right to centerY,
             .5 to top,
             .5 to bottom,
         )
