@@ -300,12 +300,42 @@ def write_session(
 def prepare_one(entry: dict, output: Path, model: Path) -> dict:
     h_ex = entry["harness_exercise_id"]
     p_ex = entry["production_exercise_id"]
-    video = acquire(entry["url"], h_ex, output)
-    digest = sha256_file(video)
+    urls = list(entry.get("urls") or [entry["url"]])
     expected = entry.get("expected_sha256")
-    if expected and digest != expected:
-        raise AssertionError(f"{h_ex}: source hash changed: {digest} != {expected}")
-    oracle = oracle_from_video(video, h_ex, model)
+    failures: list[str] = []
+    chosen_url = None
+    video = None
+    digest = None
+    oracle = None
+
+    # Source selection is independent of Gym Buddy production behavior. A candidate
+    # is admitted only if the external harness can actually observe the required
+    # joints and recover a non-trivial exercise cycle from real RGB.
+    for url in urls:
+        try:
+            candidate = acquire(url, h_ex, output)
+            candidate_digest = sha256_file(candidate)
+            if expected and candidate_digest != expected:
+                raise AssertionError(
+                    f"{h_ex}: source hash changed: {candidate_digest} != {expected}"
+                )
+            candidate_oracle = oracle_from_video(candidate, h_ex, model)
+        except Exception as exc:
+            failures.append(f"{url}: {exc}")
+            print(f"SOURCE_REJECT {h_ex} url={url} reason={exc}")
+            continue
+        chosen_url = url
+        video = candidate
+        digest = candidate_digest
+        oracle = candidate_oracle
+        break
+
+    if video is None or digest is None or oracle is None or chosen_url is None:
+        raise AssertionError(
+            f"{h_ex}: no candidate source passed independent quality gates: "
+            + " | ".join(failures)
+        )
+
     _, samples = load_sampled_frames(video)
     sessions = []
     for variant in ("clean", "frame_drop", "motion_blur", "low_light"):
@@ -316,7 +346,7 @@ def prepare_one(entry: dict, output: Path, model: Path) -> dict:
     return {
         "harness_exercise_id": h_ex,
         "production_exercise_id": p_ex,
-        "url": entry["url"],
+        "url": chosen_url,
         "sha256": digest,
         "hash_pinned": bool(expected),
         "bytes": video.stat().st_size,
