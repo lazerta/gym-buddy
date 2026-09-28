@@ -18,8 +18,8 @@ from harness.video_motion_pipeline import download_public_video
 
 HUMAN_G2_SOURCES = (
     ("incline_db_press_human", "incline_db_press", "direct", "https://wellulu.com/wp-content/uploads/2024/03/15-1.Incline-Dumbbell-Press-1.mp4"),
-    ("smith_squat_human", "smith_squat", "yt_dlp", "https://vimeo.com/376141428"),
-    ("lateral_raise_human", "lateral_raise", "direct", "https://archive.org/download/MITPE.720S06/dumbbell_lateral_raise-220k.mp4"),
+    ("smith_squat_human", "smith_squat", "direct", "https://wellulu.com/wp-content/uploads/2024/03/3-12.smith-machine_squat.mp4"),
+    ("lateral_raise_human", "lateral_raise", "direct", "https://wellulu.com/wp-content/uploads/2025/12/lateral_raise.mp4"),
 )
 
 def _sha256(path: Path) -> str:
