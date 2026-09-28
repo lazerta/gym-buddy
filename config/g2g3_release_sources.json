@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "target_fps": 8.0,
+  "max_long_side": 640,
+  "jpeg_quality": 90,
+  "sources": [
+    {
+      "exercise_id": "incline_db_press",
+      "display_name": "Incline Dumbbell Press",
+      "url": "https://www.youtube.com/watch?v=oZVCBM9f8Eo",
+      "source_name": "PureGym — How To Do A Dumbbell Incline Press",
+      "equipment": "dumbbell + incline bench",
+      "view": "demonstration",
+      "expected_sha256": null
+    },
+    {
+      "exercise_id": "smith_squat",
+      "display_name": "Smith Machine Squat",
+      "url": "https://www.youtube.com/watch?v=aT-1WbC4YaI",
+      "source_name": "StrengthLog — Smith Machine Squat: Demonstration",
+      "equipment": "smith machine",
+      "view": "demonstration",
+      "expected_sha256": null
+    },
+    {
+      "exercise_id": "lateral_raise",
+      "display_name": "Dumbbell Lateral Raise",
+      "url": "https://www.youtube.com/watch?v=XPPfnSEATJA",
+      "source_name": "NASM — How to do a Dumbbell Lateral Raise",
+      "equipment": "dumbbells",
+      "view": "demonstration",
+      "expected_sha256": null
+    }
+  ],
+  "g3_variants": ["low_light", "frame_drop", "camera_bump"]
+}
