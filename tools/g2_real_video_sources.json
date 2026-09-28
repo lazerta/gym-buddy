@@ -16,14 +16,14 @@
       "harness_exercise_id": "smith_squat",
       "production_exercise_id": "smith_machine_squat",
       "urls": [
-        "https://futurefitness.co.uk/wp-content/uploads/sites/8/2025/06/Smith-Machine-Squat.mp4",
-        "https://getfitsafely.com/wp-content/uploads/2025/02/700.mp4",
-        "https://honestexerciseequipmentreviews.com/wp-content/uploads/2025/02/4b33c1bb-2202-4d62-9bf2-7d9204032399.mp4",
-        "https://honestexerciseequipmentreviews.com/wp-content/uploads/2026/07/c4738c50bcd04626b1bb399e07eaac55.HD-1080p-7.2Mbps-62193748.mp4"
+        "https://wellulu.com/wp-content/uploads/2025/12/smithmachine_squat.mp4",
+        "https://wellulu.com/wp-content/uploads/2025/12/smithmachine_squat_ok.mp4",
+        "https://wellulu.com/wp-content/uploads/2025/12/smithmachine_squat_60kg.mp4",
+        "https://wellulu.com/wp-content/uploads/2024/03/3-12.smith-machine_squat.mp4"
       ],
       "expected_view": "SIDE",
       "expected_sha256": null,
-      "provenance_note": "Direct-MP4 Smith squat candidates only. Harness admits the first clip that independently clears pose coverage and movement-cycle quality; no threshold relaxation."
+      "provenance_note": "Wellulu direct-MP4 Smith-machine squat demonstrations. Harness admits only a candidate that clears independent pose coverage and cycle-quality gates."
     },
     {
       "harness_exercise_id": "lateral_raise",
