@@ -13,12 +13,13 @@ from pathlib import Path
 from harness.gym_episode_runtime import run_commercial_gym_episode_benchmark
 from harness.profiles import EXERCISES, external_subjects
 from harness.runner import Harness
+from harness.video_motion_pipeline import download_public_video
 
 
 HUMAN_G2_SOURCES = (
-    ("incline_db_press_human", "incline_db_press", "https://wellulu.com/wp-content/uploads/2024/03/15-1.Incline-Dumbbell-Press-1.mp4"),
-    ("smith_squat_human", "smith_squat", "https://futurefitness.co.uk/wp-content/uploads/sites/8/2025/06/Smith-Machine-Squat.mp4"),
-    ("lateral_raise_human", "lateral_raise", "https://archive.org/download/MITPE.720S06/dumbbell_lateral_raise-220k.mp4"),
+    ("incline_db_press_human", "incline_db_press", "direct", "https://wellulu.com/wp-content/uploads/2024/03/15-1.Incline-Dumbbell-Press-1.mp4"),
+    ("smith_squat_human", "smith_squat", "yt_dlp", "https://vimeo.com/376141428"),
+    ("lateral_raise_human", "lateral_raise", "direct", "https://archive.org/download/MITPE.720S06/dumbbell_lateral_raise-220k.mp4"),
 )
 
 def _sha256(path: Path) -> str:
@@ -84,40 +85,67 @@ def _download_direct(url: str, case_id: str) -> Path:
         raise AssertionError(f"empty real-human source {url}")
     return path
 
-def _probe_human_g2_sources() -> list[dict]:
+def _probe_human_g2_sources() -> tuple[list[dict], list[dict]]:
     rows = []
-    for case_id, exercise_id, url in HUMAN_G2_SOURCES:
-        video = _download_direct(url, case_id)
-        cap = cv2.VideoCapture(str(video))
-        if not cap.isOpened():
-            raise AssertionError(f"cannot decode {video}")
-        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-        cap.release()
-        sheet, sheet_index = _contact_sheet(video)
-        row = {
-            "case_id": case_id,
-            "exercise_id": exercise_id,
-            "url": url,
-            "sha256": _sha256(video),
-            "bytes": video.stat().st_size,
-            "fps": fps,
-            "frame_count": frame_count,
-            "duration_s": frame_count / fps,
-            "width": width,
-            "height": height,
-            "contact_sheet_jpeg_base64": sheet,
-            "contact_sheet_index": sheet_index,
-        }
-        rows.append(row)
-        print(
-            f"HUMAN_G2_SOURCE_PROBED {case_id} sha256={row['sha256']} "
-            f"frames={frame_count} duration={row['duration_s']:.3f}s"
+    failures = []
+    partial = Path("build/g2-human-probe/partial-summary.json")
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    for case_id, exercise_id, method, url in HUMAN_G2_SOURCES:
+        try:
+            if method == "direct":
+                video = _download_direct(url, case_id)
+            else:
+                video = download_public_video(
+                    url,
+                    exercise_id,
+                    work_root="build/g2-human-probe/yt-dlp",
+                )
+            cap = cv2.VideoCapture(str(video))
+            if not cap.isOpened():
+                raise AssertionError(f"cannot decode {video}")
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            cap.release()
+            sheet, sheet_index = _contact_sheet(video)
+            row = {
+                "case_id": case_id,
+                "exercise_id": exercise_id,
+                "method": method,
+                "url": url,
+                "sha256": _sha256(video),
+                "bytes": video.stat().st_size,
+                "fps": fps,
+                "frame_count": frame_count,
+                "duration_s": frame_count / fps,
+                "width": width,
+                "height": height,
+                "contact_sheet_jpeg_base64": sheet,
+                "contact_sheet_index": sheet_index,
+            }
+            rows.append(row)
+            print(
+                f"HUMAN_G2_SOURCE_PROBED {case_id} sha256={row['sha256']} "
+                f"frames={frame_count} duration={row['duration_s']:.3f}s"
+            )
+        except Exception as exc:
+            failure = {
+                "case_id": case_id,
+                "exercise_id": exercise_id,
+                "method": method,
+                "url": url,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            failures.append(failure)
+            print(f"HUMAN_G2_SOURCE_FAILED {case_id} {failure['error']}")
+        partial.write_text(
+            json.dumps({"sources": rows, "failures": failures}, indent=2) + "\n",
+            encoding="utf-8",
         )
-    print(f"HUMAN_G2_SOURCE_PROBE_PASS cases={len(rows)}")
-    return rows
+    print(f"HUMAN_G2_SOURCE_PROBE_DONE pass={len(rows)} fail={len(failures)}")
+    return rows, failures
+
 
 RELEASE_EXERCISES = {
     "incline_db_press",
@@ -160,7 +188,7 @@ def main() -> int:
             f"{len(failed_episodes)} commercial-gym temporal episodes failed"
         )
 
-    human_g2_probe = _probe_human_g2_sources()
+    human_g2_probe, human_g2_failures = _probe_human_g2_sources()
 
     summary = {
         "schema_version": 1,
@@ -173,6 +201,7 @@ def main() -> int:
         "temporal_failures": 0,
         "g3_real_device_claim": False,
         "human_g2_source_probe": human_g2_probe,
+        "human_g2_source_failures": human_g2_failures,
     }
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
