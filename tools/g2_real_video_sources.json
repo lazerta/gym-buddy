@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "harness_exercise_id": "incline_db_press",
+      "production_exercise_id": "incline_dumbbell_press",
+      "urls": [
+        "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-incline-bench-press.mp4",
+        "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/female/dumbbell-incline-bench-press.mp4"
+      ],
+      "expected_view": "SIDE_OBLIQUE",
+      "expected_sha256": null,
+      "provenance_note": "Remote test inputs only; do not redistribute source bytes or extracted frames."
+    },
+    {
+      "harness_exercise_id": "smith_squat",
+      "production_exercise_id": "smith_machine_squat",
+      "urls": [
+        "https://wellulu.com/wp-content/uploads/2025/12/smithmachine_squat.mp4",
+        "https://wellulu.com/wp-content/uploads/2025/12/smithmachine_squat_ok.mp4",
+        "https://wellulu.com/wp-content/uploads/2025/12/smithmachine_squat_60kg.mp4",
+        "https://wellulu.com/wp-content/uploads/2024/03/3-12.smith-machine_squat.mp4"
+      ],
+      "expected_view": "SIDE",
+      "expected_sha256": null,
+      "provenance_note": "Wellulu direct-MP4 Smith-machine squat demonstrations. Harness admits only a candidate that clears independent pose coverage and cycle-quality gates."
+    },
+    {
+      "harness_exercise_id": "lateral_raise",
+      "production_exercise_id": "dumbbell_lateral_raise",
+      "urls": [
+        "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-lateral-raise.mp4",
+        "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/female/dumbbell-lateral-raise.mp4"
+      ],
+      "expected_view": "FRONT",
+      "expected_sha256": null,
+      "provenance_note": "Remote test inputs only; do not redistribute source bytes or extracted frames."
+    }
+  ]
+}

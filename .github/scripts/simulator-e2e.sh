@@ -41,6 +41,10 @@ fi
 
 curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/results" | tee e2e-results.json
 
+# Link-first G2 + integrated G3 run. The Python harness prepared these sessions
+# concurrently with the commercial-gym simulation before the emulator started.
+bash tools/run_g2g3_android_sessions.sh build/g2g3
+
 adb shell am start -W -n "$PACKAGE/.ProductionMovementE2EActivity"
 
 passed=0
