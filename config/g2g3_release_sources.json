@@ -11,7 +11,7 @@
       "source_name": "Free Exercise DB video — Dumbbell Incline Bench Press",
       "equipment": "dumbbell + incline bench",
       "view": "demonstration",
-      "expected_sha256": null,
+      "expected_sha256": "aa1ae461a7a1a2d914f93bbf533519b458b359616a7556e77871fe4938f1caee",
       "source_note": "Public direct MP4 used as runtime test input; video bytes are not redistributed by Gym Buddy."
     },
     {
@@ -21,7 +21,7 @@
       "source_name": "Free Exercise DB video — Smith Chair Squat / Smith Machine Squat",
       "equipment": "smith machine",
       "view": "demonstration",
-      "expected_sha256": null,
+      "expected_sha256": "8ca50284c316c6cc8a69dd65aa1e1d3d3afc90fd85c6111233d743a5b99e1f7f",
       "source_note": "Public direct MP4 used as runtime test input; video bytes are not redistributed by Gym Buddy."
     },
     {
@@ -31,7 +31,7 @@
       "source_name": "Free Exercise DB video — Dumbbell Lateral Raise",
       "equipment": "dumbbells",
       "view": "demonstration",
-      "expected_sha256": null,
+      "expected_sha256": "83a2e1a45c0ab7bf168072ae5e129abb9e0e6324578cc06abe77e07b3408115b",
       "source_note": "Public direct MP4 used as runtime test input; video bytes are not redistributed by Gym Buddy."
     }
   ],
