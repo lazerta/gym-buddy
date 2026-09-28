@@ -1,36 +1,43 @@
 {
   "schema_version": 1,
-  "target_fps": 8.0,
+  "target_fps": 8,
   "max_long_side": 640,
   "jpeg_quality": 90,
   "sources": [
     {
       "exercise_id": "incline_db_press",
       "display_name": "Incline Dumbbell Press",
-      "url": "https://www.youtube.com/watch?v=oZVCBM9f8Eo",
-      "source_name": "PureGym — How To Do A Dumbbell Incline Press",
+      "url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-incline-bench-press.mp4",
+      "source_name": "Free Exercise DB video — Dumbbell Incline Bench Press",
       "equipment": "dumbbell + incline bench",
       "view": "demonstration",
-      "expected_sha256": null
+      "expected_sha256": null,
+      "source_note": "Public direct MP4 used as runtime test input; video bytes are not redistributed by Gym Buddy."
     },
     {
       "exercise_id": "smith_squat",
       "display_name": "Smith Machine Squat",
-      "url": "https://www.youtube.com/watch?v=aT-1WbC4YaI",
-      "source_name": "StrengthLog — Smith Machine Squat: Demonstration",
+      "url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/smith-chair-squat.mp4",
+      "source_name": "Free Exercise DB video — Smith Chair Squat / Smith Machine Squat",
       "equipment": "smith machine",
       "view": "demonstration",
-      "expected_sha256": null
+      "expected_sha256": null,
+      "source_note": "Public direct MP4 used as runtime test input; video bytes are not redistributed by Gym Buddy."
     },
     {
       "exercise_id": "lateral_raise",
       "display_name": "Dumbbell Lateral Raise",
-      "url": "https://www.youtube.com/watch?v=XPPfnSEATJA",
-      "source_name": "NASM — How to do a Dumbbell Lateral Raise",
+      "url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-lateral-raise.mp4",
+      "source_name": "Free Exercise DB video — Dumbbell Lateral Raise",
       "equipment": "dumbbells",
       "view": "demonstration",
-      "expected_sha256": null
+      "expected_sha256": null,
+      "source_note": "Public direct MP4 used as runtime test input; video bytes are not redistributed by Gym Buddy."
     }
   ],
-  "g3_variants": ["low_light", "frame_drop", "camera_bump"]
+  "g3_variants": [
+    "low_light",
+    "frame_drop",
+    "camera_bump"
+  ]
 }
