@@ -108,3 +108,113 @@ def resized(frame: np.ndarray, max_long_side: int) -> np.ndarray:
     h, w = frame.shape[:2]
     scale = min(1.0, max_long_side / max(h, w))
     if scale == 1.0:
+        return frame
+    return cv2.resize(frame, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
+
+
+def extract_frames(video: Path, session_root: Path, *, session_id: str, exercise_id: str, target_fps: float, max_long_side: int, jpeg_quality: int) -> dict:
+    if session_root.exists():
+        shutil.rmtree(session_root)
+    frames_dir = session_root / "frames"
+    gt_dir = session_root / "ground_truth"
+    frames_dir.mkdir(parents=True)
+    gt_dir.mkdir(parents=True)
+
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"cannot open video: {video}")
+    source_fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    next_sample_s = 0.0
+    records = []
+    out_w = out_h = None
+    source_idx = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            t_s = source_idx / source_fps
+            source_idx += 1
+            if t_s + 1e-9 < next_sample_s:
+                continue
+            next_sample_s += 1.0 / target_fps
+            frame = resized(frame, max_long_side)
+            h, w = frame.shape[:2]
+            if out_w is None:
+                out_w, out_h = w, h
+            elif (w, h) != (out_w, out_h):
+                frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+            frame_id = len(records)
+            ts_us = int(round(t_s * 1_000_000.0))
+            image_rel = f"frames/{frame_id:06d}.jpg"
+            gt_rel = f"ground_truth/{frame_id:06d}.json"
+            ok2, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, int(jpeg_quality)])
+            if not ok2:
+                raise RuntimeError(f"jpeg encode failed for frame {frame_id}")
+            (session_root / image_rel).write_bytes(encoded.tobytes())
+            (session_root / gt_rel).write_text(json.dumps({
+                "schema_version": 1,
+                "session_id": session_id,
+                "exercise_id": exercise_id,
+                "frame_id": frame_id,
+                "timestamp_us": ts_us,
+                "source_frame_index": source_idx - 1,
+                "source_time_s": t_s,
+            }, separators=(",", ":")) + "\n", encoding="utf-8")
+            records.append({
+                "frame_id": frame_id,
+                "timestamp_us": ts_us,
+                "width": out_w,
+                "height": out_h,
+                "mime_type": "image/jpeg",
+                "image_path": image_rel,
+                "ground_truth_path": gt_rel,
+            })
+    finally:
+        cap.release()
+    if len(records) < 12:
+        raise RuntimeError(f"too few sampled frames: {len(records)}")
+    manifest = {
+        "schema_version": 1,
+        "session_id": session_id,
+        "exercise_id": exercise_id,
+        "fps": target_fps,
+        "width": out_w,
+        "height": out_h,
+        "source": "real-public-rgb",
+        "frame_count": len(records),
+        "frames": records,
+    }
+    (session_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def angle_deg(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
+    ba = a[:2] - b[:2]
+    bc = c[:2] - b[:2]
+    nba = float(np.linalg.norm(ba))
+    nbc = float(np.linalg.norm(bc))
+    if nba < 1e-9 or nbc < 1e-9:
+        return math.nan
+    cosine = float(np.clip(np.dot(ba, bc) / (nba * nbc), -1.0, 1.0))
+    return math.degrees(math.acos(cosine))
+
+
+def pose_signal(landmarks: np.ndarray, confidence: np.ndarray, exercise_id: str) -> float:
+    def p(name: str) -> np.ndarray:
+        return landmarks[MP[name]]
+    def q(name: str) -> float:
+        return float(confidence[MP[name]])
+    if exercise_id == "incline_db_press":
+        triples = [
+            ("left_shoulder", "left_elbow", "left_wrist"),
+            ("right_shoulder", "right_elbow", "right_wrist"),
+        ]
+    elif exercise_id == "smith_squat":
+        triples = [
+            ("left_hip", "left_knee", "left_ankle"),
+            ("right_hip", "right_knee", "right_ankle"),
+        ]
+    elif exercise_id == "lateral_raise":
+        triples = [
+            ("left_hip", "left_shoulder", "left_elbow"),
