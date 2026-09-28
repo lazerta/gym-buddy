@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import ctypes.util
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
 import urllib.request
-import importlib.util
 
 from harness.gym_episode_runtime import run_commercial_gym_episode_benchmark
 from harness.profiles import EXERCISES, external_subjects
@@ -77,15 +78,27 @@ def ensure_pose_model(path: Path) -> None:
     tmp.replace(path)
 
 
-def ensure_vision_dependency() -> None:
-    if importlib.util.find_spec("mediapipe") is not None:
-        return
-    print("Installing external harness vision dependency (mediapipe)")
-    subprocess.run([sys.executable, "-m", "pip", "install", "mediapipe>=0.10.14"], check=True)
+def ensure_vision_runtime() -> None:
+    # MediaPipe's Linux wheel loads EGL even for CPU/video inference. Hosted
+    # Ubuntu runners do not always include libEGL.so.1, so provision the minimal
+    # runtime only when missing. This is test infrastructure only.
+    if ctypes.util.find_library("EGL") is None:
+        print("Installing minimal EGL runtime for MediaPipe")
+        subprocess.run(["sudo", "apt-get", "update"], check=True)
+        subprocess.run(
+            ["sudo", "apt-get", "install", "-y", "libegl1", "libgl1"],
+            check=True,
+        )
+    if importlib.util.find_spec("mediapipe") is None:
+        print("Installing external harness vision dependency (mediapipe)")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "mediapipe>=0.10.14"],
+            check=True,
+        )
 
 
 def run_g2_prepare(sources: Path, output: Path, model: Path) -> None:
-    ensure_vision_dependency()
+    ensure_vision_runtime()
     ensure_pose_model(model)
     cmd = [
         sys.executable,
