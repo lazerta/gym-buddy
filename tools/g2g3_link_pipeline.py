@@ -548,3 +548,36 @@ def self_test() -> int:
     assert out["expected_reps"] == 2, out
     # press: high-low-high twice
     y = []
+    for _ in range(2):
+        y += list(np.linspace(165, 70, 20)) + list(np.linspace(70, 165, 20))
+    out2 = detect_cycles(ts, y, "incline_db_press")
+    assert out2["expected_reps"] == 2, out2
+    print("G2G3_LINK_PIPELINE_SELF_TEST_PASS")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("self-test")
+    pp = sub.add_parser("prepare")
+    pp.add_argument("--registry", type=Path, required=True)
+    pp.add_argument("--harness-root", type=Path, required=True)
+    pp.add_argument("--model", type=Path, required=True)
+    pp.add_argument("--output", type=Path, required=True)
+    sp = sub.add_parser("score")
+    sp.add_argument("--prepared", type=Path, required=True)
+    sp.add_argument("--results", type=Path, required=True)
+    sp.add_argument("--sim-gym", type=Path, required=True)
+    sp.add_argument("--output", type=Path, required=True)
+    sp.add_argument("--allow-unpinned", action="store_true")
+    args = p.parse_args()
+    if args.cmd == "self-test":
+        return self_test()
+    if args.cmd == "prepare":
+        return prepare(args)
+    return score(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
