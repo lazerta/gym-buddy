@@ -5,6 +5,7 @@ import argparse
 import json
 import base64
 import hashlib
+import urllib.request
 import cv2
 import numpy as np
 from pathlib import Path
@@ -12,13 +13,12 @@ from pathlib import Path
 from harness.gym_episode_runtime import run_commercial_gym_episode_benchmark
 from harness.profiles import EXERCISES, external_subjects
 from harness.runner import Harness
-from harness.video_motion_pipeline import download_public_video
 
 
 HUMAN_G2_SOURCES = (
-    ("incline_db_press_human", "incline_db_press", "https://www.youtube.com/watch?v=wsCi4OnQ-xs"),
-    ("smith_squat_human", "smith_squat", "https://www.youtube.com/watch?v=8J5JPcJ3A_A"),
-    ("lateral_raise_human", "lateral_raise", "https://www.youtube.com/watch?v=XPPfnSEATJA"),
+    ("incline_db_press_human", "incline_db_press", "https://wellulu.com/wp-content/uploads/2024/03/15-1.Incline-Dumbbell-Press-1.mp4"),
+    ("smith_squat_human", "smith_squat", "https://futurefitness.co.uk/wp-content/uploads/sites/8/2025/06/Smith-Machine-Squat.mp4"),
+    ("lateral_raise_human", "lateral_raise", "https://archive.org/download/MITPE.720S06/dumbbell_lateral_raise-220k.mp4"),
 )
 
 def _sha256(path: Path) -> str:
@@ -69,14 +69,25 @@ def _contact_sheet(path: Path, samples: int = 48) -> tuple[str, list[dict]]:
         raise AssertionError(f"cannot encode contact sheet {path}")
     return base64.b64encode(encoded.tobytes()).decode("ascii"), index
 
+def _download_direct(url: str, case_id: str) -> Path:
+    root = Path("build/g2-human-probe/direct")
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{case_id}.mp4"
+    req = urllib.request.Request(url, headers={"User-Agent": "GymBuddy-G2-Probe/1"})
+    with urllib.request.urlopen(req, timeout=120) as response, path.open("wb") as out:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+    if path.stat().st_size <= 0:
+        raise AssertionError(f"empty real-human source {url}")
+    return path
+
 def _probe_human_g2_sources() -> list[dict]:
     rows = []
     for case_id, exercise_id, url in HUMAN_G2_SOURCES:
-        video = download_public_video(
-            url,
-            exercise_id,
-            work_root="build/g2-human-probe",
-        )
+        video = _download_direct(url, case_id)
         cap = cv2.VideoCapture(str(video))
         if not cap.isOpened():
             raise AssertionError(f"cannot decode {video}")
