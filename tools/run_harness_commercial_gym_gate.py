@@ -82,11 +82,14 @@ def ensure_vision_runtime() -> None:
     # MediaPipe's Linux wheel loads EGL even for CPU/video inference. Hosted
     # Ubuntu runners do not always include libEGL.so.1, so provision the minimal
     # runtime only when missing. This is test infrastructure only.
-    if ctypes.util.find_library("EGL") is None:
-        print("Installing minimal EGL runtime for MediaPipe")
+    if (
+        ctypes.util.find_library("EGL") is None
+        or ctypes.util.find_library("GLESv2") is None
+    ):
+        print("Installing minimal EGL/GLES runtime for MediaPipe")
         subprocess.run(["sudo", "apt-get", "update"], check=True)
         subprocess.run(
-            ["sudo", "apt-get", "install", "-y", "libegl1", "libgl1"],
+            ["sudo", "apt-get", "install", "-y", "libegl1", "libgl1", "libgles2"],
             check=True,
         )
     if importlib.util.find_spec("mediapipe") is None:
