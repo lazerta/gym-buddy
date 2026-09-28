@@ -16,11 +16,14 @@
       "harness_exercise_id": "smith_squat",
       "production_exercise_id": "smith_machine_squat",
       "urls": [
-        "https://futurefitness.co.uk/wp-content/uploads/sites/8/2025/06/Smith-Machine-Squat.mp4"
+        "https://futurefitness.co.uk/wp-content/uploads/sites/8/2025/06/Smith-Machine-Squat.mp4",
+        "https://getfitsafely.com/wp-content/uploads/2025/02/700.mp4",
+        "https://honestexerciseequipmentreviews.com/wp-content/uploads/2025/02/4b33c1bb-2202-4d62-9bf2-7d9204032399.mp4",
+        "https://honestexerciseequipmentreviews.com/wp-content/uploads/2026/07/c4738c50bcd04626b1bb399e07eaac55.HD-1080p-7.2Mbps-62193748.mp4"
       ],
       "expected_view": "SIDE",
       "expected_sha256": null,
-      "provenance_note": "Future Fitness exercise-library Smith Machine Squat direct MP4. Harness still requires independent pose/movement quality before admission."
+      "provenance_note": "Direct-MP4 Smith squat candidates only. Harness admits the first clip that independently clears pose coverage and movement-cycle quality; no threshold relaxation."
     },
     {
       "harness_exercise_id": "lateral_raise",
