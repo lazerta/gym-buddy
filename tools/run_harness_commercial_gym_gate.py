@@ -23,6 +23,7 @@ RELEASE_EXERCISES = {
 SUBJECT_ID = "ansur_median_central"
 DEFAULT_G2G3_OUTPUT = Path("build/harness-contracts/g2g3-prepared")
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+EXPECTED_MODEL_SHA256 = "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
 
 def ensure_pose_model() -> tuple[Path, str]:
     repo_asset = Path("app/src/main/assets/pose_landmarker_lite.task")
@@ -35,6 +36,10 @@ def ensure_pose_model() -> tuple[Path, str]:
             print(f"Downloading pinned MediaPipe pose model: {MODEL_URL}")
             urllib.request.urlretrieve(MODEL_URL, model)
     digest = hashlib.sha256(model.read_bytes()).hexdigest()
+    if digest != EXPECTED_MODEL_SHA256:
+        raise AssertionError(
+            f"MediaPipe model SHA-256 changed: expected {EXPECTED_MODEL_SHA256}, got {digest}"
+        )
     print(f"G2G3_MODEL_HASH sha256={digest}")
     return model, digest
 
