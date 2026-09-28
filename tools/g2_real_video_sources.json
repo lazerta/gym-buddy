@@ -16,13 +16,11 @@
       "harness_exercise_id": "smith_squat",
       "production_exercise_id": "smith_machine_squat",
       "urls": [
-        "https://vimeo.com/784371993",
-        "https://vimeo.com/863952816",
-        "https://www.youtube.com/watch?v=aT-1WbC4YaI"
+        "https://futurefitness.co.uk/wp-content/uploads/sites/8/2025/06/Smith-Machine-Squat.mp4"
       ],
       "expected_view": "SIDE",
       "expected_sha256": null,
-      "provenance_note": "Exact Smith Machine Squat demonstrations. Harness selects the first link that passes independent pose/movement quality; no source is trusted merely because it downloads."
+      "provenance_note": "Future Fitness exercise-library Smith Machine Squat direct MP4. Harness still requires independent pose/movement quality before admission."
     },
     {
       "harness_exercise_id": "lateral_raise",
