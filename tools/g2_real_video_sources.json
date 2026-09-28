@@ -16,12 +16,13 @@
       "harness_exercise_id": "smith_squat",
       "production_exercise_id": "smith_machine_squat",
       "urls": [
-        "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/female/smith-chair-squat.mp4",
+        "https://vimeo.com/784371993",
+        "https://vimeo.com/863952816",
         "https://www.youtube.com/watch?v=aT-1WbC4YaI"
       ],
       "expected_view": "SIDE",
       "expected_sha256": null,
-      "provenance_note": "Harness selects the first real-RGB link that passes independent pose/movement quality. StrengthLog demonstration is the fallback exact Smith-machine movement."
+      "provenance_note": "Exact Smith Machine Squat demonstrations. Harness selects the first link that passes independent pose/movement quality; no source is trusted merely because it downloads."
     },
     {
       "harness_exercise_id": "lateral_raise",
