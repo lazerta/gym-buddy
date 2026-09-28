@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import hashlib
+import urllib.request
 
 from harness.gym_episode_runtime import run_commercial_gym_episode_benchmark
 from harness.profiles import EXERCISES, external_subjects
@@ -20,6 +22,21 @@ RELEASE_EXERCISES = {
 }
 SUBJECT_ID = "ansur_median_central"
 DEFAULT_G2G3_OUTPUT = Path("build/harness-contracts/g2g3-prepared")
+MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+
+def ensure_pose_model() -> tuple[Path, str]:
+    repo_asset = Path("app/src/main/assets/pose_landmarker_lite.task")
+    if repo_asset.exists():
+        model = repo_asset
+    else:
+        model = Path("build/harness-contracts/pose_landmarker_lite.task")
+        model.parent.mkdir(parents=True, exist_ok=True)
+        if not model.exists():
+            print(f"Downloading pinned MediaPipe pose model: {MODEL_URL}")
+            urllib.request.urlretrieve(MODEL_URL, model)
+    digest = hashlib.sha256(model.read_bytes()).hexdigest()
+    print(f"G2G3_MODEL_HASH sha256={digest}")
+    return model, digest
 
 
 def run_sim_gym() -> dict:
@@ -70,6 +87,7 @@ def ensure_mediapipe() -> None:
 
 def run_g2g3_prepare(output: Path) -> dict:
     ensure_mediapipe()
+    model_path, model_sha256 = ensure_pose_model()
     cmd = [
         sys.executable,
         "tools/g2g3_link_pipeline.py",
@@ -79,7 +97,7 @@ def run_g2g3_prepare(output: Path) -> dict:
         "--harness-root",
         "harness-src",
         "--model",
-        "app/src/main/assets/pose_landmarker_lite.task",
+        str(model_path),
         "--output",
         str(output),
     ]
@@ -88,6 +106,7 @@ def run_g2g3_prepare(output: Path) -> dict:
     return {
         "all_hashes_pinned": bool(prepared.get("all_hashes_pinned")),
         "session_count": len(prepared.get("sessions", [])),
+        "model_sha256": model_sha256,
         "sources": [
             {
                 "exercise_id": x["exercise_id"],
