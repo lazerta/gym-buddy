@@ -14,6 +14,7 @@ import com.gymbuddy.domain.pose.PoseFrame
 import com.gymbuddy.domain.profile.AnalysisConfigResolver
 import com.gymbuddy.domain.profiles.ExerciseBundle
 import com.gymbuddy.domain.profiles.InitialExerciseProfiles
+import com.gymbuddy.domain.tracking.TrackingObservationContext
 import com.gymbuddy.frames.FrameAnalysisLoop
 import com.gymbuddy.frames.FrameSource
 import com.gymbuddy.frames.SimulatorFrameSource
@@ -49,7 +50,18 @@ class SimulatorE2EActivity : ComponentActivity() {
             val bundle = InitialExerciseProfiles.resolveByExternalId(session.exerciseId)
                 ?: error("Unsupported exercise_id: ${session.exerciseId}")
             val runId = UUID.randomUUID().toString()
-            val activeAnalyzer = ProductionFrameAnalyzer(poseAnalyzer) { firstFrame -> processor(bundle, session.sessionId, runId, firstFrame) }
+            // G2 sources are admitted only after the harness verifies the clip matches
+            // the release exercise/equipment/intended view. Feed that known test context
+            // into the same production camera/tracking gate instead of leaving the view
+            // unknown, which would intentionally hold the lifecycle at ADJUST_ANGLE.
+            val activeAnalyzer = ProductionFrameAnalyzer(
+                poseAnalyzer = poseAnalyzer,
+                observationContextProvider = {
+                    TrackingObservationContext(
+                        observedViewClass = bundle.profile.cameraProfile.preferredViewClass,
+                    )
+                },
+            ) { firstFrame -> processor(bundle, session.sessionId, runId, firstFrame) }
             analyzer = activeAnalyzer
             val activeSource = SimulatorFrameSource(transport, JpegMpImageDecoder(), realtimePacing = false)
             source = activeSource
