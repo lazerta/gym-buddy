@@ -96,3 +96,48 @@ gradle :app:connectedDebugAndroidTest --stacktrace
 
 # Require per-test execution evidence even if Gradle reports zero tests.
 bash tools/step3_instrumentation_e2e.sh
+
+# The workflow-level deterministic frame server has completed its transport role.
+# G2/G3 now reuses the same port for each real-RGB session one at a time.
+if [ -f frame-server.pid ]; then
+  kill "$(cat frame-server.pid)" >/dev/null 2>&1 || true
+  wait "$(cat frame-server.pid)" >/dev/null 2>&1 || true
+  rm -f frame-server.pid
+fi
+
+G2G3_PREPARED=build/harness-contracts/g2g3-prepared
+G2G3_RESULTS=build/harness-contracts/g2g3-android-results
+G2G3_SIM_SUMMARY=build/harness-contracts/commercial-gym-summary.json
+G2G3_REPORT=build/harness-contracts/g2g3-release-report.json
+
+if [ ! -f "$G2G3_PREPARED/prepared.json" ]; then
+  echo "Missing G2/G3 prepared sessions: $G2G3_PREPARED/prepared.json"
+  exit 1
+fi
+
+bash .github/scripts/g2g3_android_e2e.sh "$G2G3_PREPARED" "$G2G3_RESULTS"
+
+extra=()
+if ! python -c "import json; p=json.load(open('$G2G3_PREPARED/prepared.json',encoding='utf-8')); raise SystemExit(0 if p.get('all_hashes_pinned') else 1)"; then
+  echo "G2/G3 source hashes are in bootstrap mode; runtime gates remain strict."
+  extra+=(--allow-unpinned)
+fi
+python tools/g2g3_link_pipeline.py score \
+  --prepared "$G2G3_PREPARED/prepared.json" \
+  --results "$G2G3_RESULTS" \
+  --sim-gym "$G2G3_SIM_SUMMARY" \
+  --output "$G2G3_REPORT" \
+  "${extra[@]}"
+
+python - "$G2G3_SIM_SUMMARY" "$G2G3_REPORT" <<'PY'
+import json,sys
+summary_path,report_path=sys.argv[1:]
+summary=json.load(open(summary_path,encoding='utf-8'))
+report=json.load(open(report_path,encoding='utf-8'))
+summary['g2g3_release']=report
+with open(summary_path,'w',encoding='utf-8') as f:
+    json.dump(summary,f,indent=2); f.write('\n')
+print('G2G3_RELEASE_REPORT_ATTACHED')
+PY
+
+echo "G2G3_INTEGRATED_RELEASE_GATE_PASS"
