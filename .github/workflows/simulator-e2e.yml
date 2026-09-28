@@ -45,6 +45,13 @@ jobs:
           python tools/run_harness_commercial_gym_gate.py
           --output build/harness-contracts/commercial-gym-summary.json
 
+      - name: Upload early human G2 probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2-human-probe-early
+          path: build/harness-contracts/commercial-gym-summary.json
+          if-no-files-found: error
+
       - name: Generate harness temporal contracts
         run: >-
           python tools/generate_harness_temporal_contracts.py
