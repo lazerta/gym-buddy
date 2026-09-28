@@ -3,11 +3,110 @@ from __future__ import annotations
 
 import argparse
 import json
+import base64
+import hashlib
+import cv2
+import numpy as np
 from pathlib import Path
 
 from harness.gym_episode_runtime import run_commercial_gym_episode_benchmark
 from harness.profiles import EXERCISES, external_subjects
 from harness.runner import Harness
+from harness.video_motion_pipeline import download_public_video
+
+
+HUMAN_G2_SOURCES = (
+    ("incline_db_press_human", "incline_db_press", "https://www.youtube.com/watch?v=wsCi4OnQ-xs"),
+    ("smith_squat_human", "smith_squat", "https://www.youtube.com/watch?v=8J5JPcJ3A_A"),
+    ("lateral_raise_human", "lateral_raise", "https://www.youtube.com/watch?v=XPPfnSEATJA"),
+)
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def _contact_sheet(path: Path, samples: int = 48) -> tuple[str, list[dict]]:
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise AssertionError(f"cannot open human G2 source {path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if fps <= 0 or count <= 0:
+        raise AssertionError(f"invalid video metadata {path}: fps={fps} count={count}")
+    indices = np.linspace(0, count - 1, min(samples, count), dtype=int)
+    thumbs = []
+    index = []
+    for raw in indices:
+        frame_index = int(raw)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        h, w = frame.shape[:2]
+        scale = min(320 / w, 240 / h)
+        frame = cv2.resize(frame, (max(1, int(w * scale)), max(1, int(h * scale))))
+        timestamp_s = frame_index / fps
+        label = f"{frame_index} {timestamp_s:.2f}s"
+        cv2.putText(frame, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, .55, (255,255,255), 2, cv2.LINE_AA)
+        cv2.putText(frame, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, .55, (0,0,0), 1, cv2.LINE_AA)
+        thumbs.append(frame)
+        index.append({"frame": frame_index, "timestamp_s": timestamp_s})
+    cap.release()
+    cols = 4
+    rows = (len(thumbs) + cols - 1) // cols
+    cell_w = max(x.shape[1] for x in thumbs)
+    cell_h = max(x.shape[0] for x in thumbs)
+    canvas = np.zeros((rows * cell_h, cols * cell_w, 3), dtype=np.uint8)
+    for i, frame in enumerate(thumbs):
+        r, c = divmod(i, cols)
+        y, x = r * cell_h, c * cell_w
+        canvas[y:y+frame.shape[0], x:x+frame.shape[1]] = frame
+    ok, encoded = cv2.imencode(".jpg", canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    if not ok:
+        raise AssertionError(f"cannot encode contact sheet {path}")
+    return base64.b64encode(encoded.tobytes()).decode("ascii"), index
+
+def _probe_human_g2_sources() -> list[dict]:
+    rows = []
+    for case_id, exercise_id, url in HUMAN_G2_SOURCES:
+        video = download_public_video(
+            url,
+            exercise_id,
+            work_root="build/g2-human-probe",
+        )
+        cap = cv2.VideoCapture(str(video))
+        if not cap.isOpened():
+            raise AssertionError(f"cannot decode {video}")
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        cap.release()
+        sheet, sheet_index = _contact_sheet(video)
+        row = {
+            "case_id": case_id,
+            "exercise_id": exercise_id,
+            "url": url,
+            "sha256": _sha256(video),
+            "bytes": video.stat().st_size,
+            "fps": fps,
+            "frame_count": frame_count,
+            "duration_s": frame_count / fps,
+            "width": width,
+            "height": height,
+            "contact_sheet_jpeg_base64": sheet,
+            "contact_sheet_index": sheet_index,
+        }
+        rows.append(row)
+        print(
+            f"HUMAN_G2_SOURCE_PROBED {case_id} sha256={row['sha256']} "
+            f"frames={frame_count} duration={row['duration_s']:.3f}s"
+        )
+    print(f"HUMAN_G2_SOURCE_PROBE_PASS cases={len(rows)}")
+    return rows
 
 RELEASE_EXERCISES = {
     "incline_db_press",
@@ -50,6 +149,8 @@ def main() -> int:
             f"{len(failed_episodes)} commercial-gym temporal episodes failed"
         )
 
+    human_g2_probe = _probe_human_g2_sources()
+
     summary = {
         "schema_version": 1,
         "evidence_tier": "SYNTHETIC_COMMERCIAL_GYM",
@@ -60,6 +161,7 @@ def main() -> int:
         "static_failures": 0,
         "temporal_failures": 0,
         "g3_real_device_claim": False,
+        "human_g2_source_probe": human_g2_probe,
     }
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
