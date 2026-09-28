@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "harness_exercise_id": "incline_db_press",
+      "production_exercise_id": "incline_dumbbell_press",
+      "url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-incline-bench-press.mp4",
+      "expected_view": "SIDE_OBLIQUE",
+      "expected_sha256": null,
+      "provenance_note": "Publicly reachable remote test input; upstream footage provenance is not verified. Do not redistribute source bytes or extracted frames."
+    },
+    {
+      "harness_exercise_id": "smith_squat",
+      "production_exercise_id": "smith_machine_squat",
+      "url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/smith-chair-squat.mp4",
+      "expected_view": "SIDE",
+      "expected_sha256": null,
+      "provenance_note": "Publicly reachable remote test input; upstream footage provenance is not verified. Do not redistribute source bytes or extracted frames."
+    },
+    {
+      "harness_exercise_id": "lateral_raise",
+      "production_exercise_id": "dumbbell_lateral_raise",
+      "url": "https://pub-585d42eb1aa64a67aedf483ec328d3fe.r2.dev/exercise-videos/male/dumbbell-lateral-raise.mp4",
+      "expected_view": "FRONT",
+      "expected_sha256": null,
+      "provenance_note": "Publicly reachable remote test input; upstream footage provenance is not verified. Do not redistribute source bytes or extracted frames."
+    }
+  ]
+}
