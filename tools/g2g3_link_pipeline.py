@@ -438,3 +438,113 @@ def prepare_one(source: dict, cfg: dict, output: Path, harness_root: Path, model
         "url": source["url"],
         "source_name": source.get("source_name"),
         "equipment": source.get("equipment"),
+        "view": source.get("view"),
+        "sha256": digest,
+        "hash_pinned": bool(expected),
+        "video": meta,
+        "oracle": oracle,
+        "sessions": sessions,
+    }
+
+
+def prepare(args) -> int:
+    cfg = json.loads(args.registry.read_text())
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    sources = cfg["sources"]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(sources)) as pool:
+        futures = [pool.submit(prepare_one, s, cfg, output, args.harness_root.resolve(), args.model.resolve()) for s in sources]
+        items = [f.result() for f in futures]
+    all_sessions = [s for item in items for s in item["sessions"]]
+    prepared = {
+        "schema_version": 1,
+        "pipeline": "link->acquire->oracle->frame-session->android->score",
+        "sources": items,
+        "sessions": all_sessions,
+        "all_hashes_pinned": all(x["hash_pinned"] for x in items),
+    }
+    (output / "prepared.json").write_text(json.dumps(prepared, indent=2) + "\n", encoding="utf-8")
+    for item in items:
+        print(f"G2G3_SOURCE_HASH exercise={item['exercise_id']} sha256={item['sha256']}")
+    print(json.dumps({"prepared": str(output / 'prepared.json'), "sessions": len(all_sessions), "all_hashes_pinned": prepared["all_hashes_pinned"]}, indent=2))
+    return 0
+
+
+def collect_android_result(path: Path) -> dict:
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, list) or not payload:
+        raise AssertionError(f"missing Android frame results: {path}")
+    analyses = [x["analysis"] for x in payload]
+    final_count = int(analyses[-1].get("rep_count", 0))
+    counts = [int(x.get("rep_count", 0)) for x in analyses]
+    pose_fraction = sum(int(x.get("pose_count", 0)) > 0 for x in analyses) / len(analyses)
+    cues = [cue for x in analyses for cue in (x.get("cues") or [])]
+    return {
+        "frames": len(payload),
+        "final_rep_count": final_count,
+        "max_rep_count": max(counts),
+        "monotonic_rep_count": all(a <= b for a, b in zip(counts, counts[1:])),
+        "android_pose_fraction": pose_fraction,
+        "cue_count": len(cues),
+        "tracking_states": sorted(set(str(x.get("tracking_state")) for x in analyses)),
+        "camera_guidance": sorted(set(str(x.get("camera_guidance")) for x in analyses)),
+    }
+
+
+def score(args) -> int:
+    prepared = json.loads(args.prepared.read_text())
+    sim_gym = json.loads(args.sim_gym.read_text())
+    source_map = {x["exercise_id"]: x for x in prepared["sources"]}
+    rows = []
+    g2_pass = True
+    g3_stress_pass = True
+    for session in prepared["sessions"]:
+        result_path = args.results / f"{session['session_id']}.json"
+        obs = collect_android_result(result_path)
+        expected = int(session["expected_reps"])
+        if session["kind"] == "g2_clean":
+            passed = (
+                obs["final_rep_count"] == expected
+                and obs["max_rep_count"] == expected
+                and obs["monotonic_rep_count"]
+                and obs["android_pose_fraction"] >= 0.55
+                and source_map[session["exercise_id"]]["oracle"]["pose_coverage"] >= 0.55
+            )
+            g2_pass &= passed
+        else:
+            passed = obs["max_rep_count"] <= expected and obs["monotonic_rep_count"]
+            g3_stress_pass &= passed
+        rows.append({**session, **obs, "passed": passed})
+    sim_pass = sim_gym.get("static_failures") == 0 and sim_gym.get("temporal_failures") == 0
+    hashes_pinned = bool(prepared.get("all_hashes_pinned"))
+    runtime_passed = bool(g2_pass and g3_stress_pass and sim_pass)
+    report = {
+        "schema_version": 1,
+        "g2": {"passed": g2_pass, "all_source_hashes_pinned": hashes_pinned},
+        "g3": {"passed": runtime_passed, "rgb_stress_passed": g3_stress_pass, "sim_gym_passed": sim_pass},
+        "sessions": rows,
+        "sim_gym": sim_gym,
+        "runtime_passed": runtime_passed,
+        "release_passed": bool(runtime_passed and hashes_pinned),
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    if not runtime_passed:
+        raise SystemExit(2)
+    if not hashes_pinned and not args.allow_unpinned:
+        raise SystemExit(3)
+    return 0
+
+
+def self_test() -> int:
+    # Cycle detection tests production-independent temporal semantics.
+    ts = [i * 100_000 for i in range(80)]
+    # lateral: low-high-low twice
+    x = []
+    for _ in range(2):
+        x += list(np.linspace(15, 95, 20)) + list(np.linspace(95, 15, 20))
+    out = detect_cycles(ts, x, "lateral_raise")
+    assert out["expected_reps"] == 2, out
+    # press: high-low-high twice
+    y = []
