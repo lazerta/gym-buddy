@@ -218,3 +218,113 @@ def pose_signal(landmarks: np.ndarray, confidence: np.ndarray, exercise_id: str)
     elif exercise_id == "lateral_raise":
         triples = [
             ("left_hip", "left_shoulder", "left_elbow"),
+            ("right_hip", "right_shoulder", "right_elbow"),
+        ]
+    else:
+        raise KeyError(exercise_id)
+    values = []
+    for a, b, c in triples:
+        if min(q(a), q(b), q(c)) < 0.45:
+            continue
+        v = angle_deg(p(a), p(b), p(c))
+        if math.isfinite(v):
+            values.append(v)
+    return float(np.mean(values)) if values else math.nan
+
+
+def smooth_signal(values: list[float]) -> np.ndarray:
+    x = np.asarray(values, dtype=float)
+    if x.size < 5:
+        return x
+    # interpolate short NaN gaps before robust smoothing
+    valid = np.isfinite(x)
+    if valid.sum() < 5:
+        return x
+    idx = np.arange(x.size)
+    x = np.interp(idx, idx[valid], x[valid])
+    med = np.array([np.median(x[max(0, i-2):min(x.size, i+3)]) for i in range(x.size)])
+    kernel = np.ones(3) / 3.0
+    return np.convolve(np.pad(med, (1,1), mode="edge"), kernel, mode="valid")
+
+
+def detect_cycles(timestamps_us: list[int], values: list[float], exercise_id: str) -> dict:
+    sm = smooth_signal(values)
+    finite = sm[np.isfinite(sm)]
+    if finite.size < 8:
+        return {"expected_reps": 0, "rep_windows": [], "quality": {"reason": "insufficient_signal"}}
+    low = float(np.percentile(finite, 20))
+    high = float(np.percentile(finite, 80))
+    amplitude = high - low
+    if amplitude < 18.0:
+        return {"expected_reps": 0, "rep_windows": [], "quality": {"reason": "low_amplitude", "amplitude_deg": amplitude}}
+    mode = "low_high_low" if exercise_id == "lateral_raise" else "high_low_high"
+    start_threshold = low + 0.18 * amplitude if mode == "low_high_low" else high - 0.18 * amplitude
+    turn_threshold = high - 0.18 * amplitude if mode == "low_high_low" else low + 0.18 * amplitude
+    state = "seek_start"
+    start_i = turn_i = None
+    windows = []
+    dwell = 0
+    for i, v in enumerate(sm):
+        if not math.isfinite(float(v)):
+            dwell = 0
+            continue
+        at_start = v <= start_threshold if mode == "low_high_low" else v >= start_threshold
+        at_turn = v >= turn_threshold if mode == "low_high_low" else v <= turn_threshold
+        if state == "seek_start":
+            dwell = dwell + 1 if at_start else 0
+            if dwell >= 2:
+                start_i = i
+                state = "seek_turn"
+                dwell = 0
+        elif state == "seek_turn":
+            dwell = dwell + 1 if at_turn else 0
+            if dwell >= 2:
+                turn_i = i
+                state = "seek_complete"
+                dwell = 0
+        else:
+            dwell = dwell + 1 if at_start else 0
+            if dwell >= 2 and start_i is not None and turn_i is not None:
+                complete_i = i
+                duration_s = (timestamps_us[complete_i] - timestamps_us[start_i]) / 1_000_000.0
+                if 0.35 <= duration_s <= 12.0:
+                    windows.append({
+                        "ordinal": len(windows) + 1,
+                        "start_us": timestamps_us[start_i],
+                        "turn_us": timestamps_us[turn_i],
+                        "complete_us": timestamps_us[complete_i],
+                    })
+                start_i = complete_i
+                turn_i = None
+                state = "seek_turn"
+                dwell = 0
+    return {
+        "expected_reps": len(windows),
+        "rep_windows": windows,
+        "quality": {
+            "reason": "ok",
+            "low_threshold_deg": low,
+            "high_threshold_deg": high,
+            "amplitude_deg": amplitude,
+            "cycle_mode": mode,
+        },
+    }
+
+
+def build_oracle(session_root: Path, exercise_id: str, model_path: Path, harness_root: Path) -> dict:
+    sys.path.insert(0, str(harness_root))
+    try:
+        from harness.rgb import MediaPipePoseProvider
+        provider = MediaPipePoseProvider(str(model_path), num_poses=2)
+        manifest = json.loads((session_root / "manifest.json").read_text())
+        timestamps = []
+        signals = []
+        pose_frames = 0
+        for frame_meta in manifest["frames"]:
+            frame = cv2.imread(str(session_root / frame_meta["image_path"]))
+            pose = provider.infer(frame, frame_meta["frame_id"], frame_meta["timestamp_us"] / 1000.0)
+            timestamps.append(int(frame_meta["timestamp_us"]))
+            if pose is None:
+                signals.append(math.nan)
+                continue
+            pose_frames += 1
