@@ -1,0 +1,36 @@
+name: g2-human-probe-fast
+
+on:
+  push:
+    branches:
+      - "integration/g2-human-probe-20260928"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Checkout simulator harness
+        uses: actions/checkout@v4
+        with:
+          repository: lazerta/virtual-gym-buddy-simulator-harness
+          ref: d8a6e9569f424c4d97ddde5d1c41df93201f163d
+          path: harness-src
+      - name: Install harness
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./harness-src
+      - name: Probe real-human sources through Python harness
+        run: >-
+          python tools/run_harness_commercial_gym_gate.py
+          --output build/g2-human-probe-summary.json
+      - name: Upload probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2-human-probe-fast
+          path: build/g2-human-probe-summary.json
+          if-no-files-found: error
