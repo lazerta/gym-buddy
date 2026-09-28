@@ -328,3 +328,113 @@ def build_oracle(session_root: Path, exercise_id: str, model_path: Path, harness
                 signals.append(math.nan)
                 continue
             pose_frames += 1
+            signals.append(pose_signal(pose.landmarks, pose.confidence, exercise_id))
+    finally:
+        if sys.path and sys.path[0] == str(harness_root):
+            sys.path.pop(0)
+    detected = detect_cycles(timestamps, signals, exercise_id)
+    coverage = pose_frames / max(1, len(timestamps))
+    detected["pose_coverage"] = coverage
+    detected["form_labels_complete"] = False
+    detected["cue_labels"] = "NOT_ASSESSED"
+    detected["label_method"] = "independent_python_mediapipe_temporal_oracle_v1"
+    (session_root / "oracle.json").write_text(json.dumps(detected, indent=2) + "\n", encoding="utf-8")
+    if detected["expected_reps"] <= 0:
+        raise AssertionError(f"{exercise_id}: independent oracle detected no complete reps")
+    if coverage < 0.55:
+        raise AssertionError(f"{exercise_id}: oracle pose coverage too low: {coverage:.3f}")
+    return detected
+
+
+def apply_variant(clean_root: Path, out_root: Path, kind: str, oracle: dict) -> dict:
+    if out_root.exists():
+        shutil.rmtree(out_root)
+    (out_root / "frames").mkdir(parents=True)
+    (out_root / "ground_truth").mkdir(parents=True)
+    clean = json.loads((clean_root / "manifest.json").read_text())
+    selected = clean["frames"]
+    if kind == "frame_drop":
+        selected = [f for i, f in enumerate(selected) if (i % 4) != 2]
+    new_records = []
+    for new_id, src in enumerate(selected):
+        img = cv2.imread(str(clean_root / src["image_path"]))
+        if kind == "low_light":
+            img = np.clip(img.astype(np.float32) * 0.34, 0, 255).astype(np.uint8)
+        elif kind == "camera_bump":
+            if new_id >= len(selected) // 2:
+                h, w = img.shape[:2]
+                matrix = np.float32([[1, 0, 0.10 * w], [0, 1, -0.07 * h]])
+                img = cv2.warpAffine(img, matrix, (w, h), borderMode=cv2.BORDER_REFLECT)
+        elif kind != "frame_drop":
+            raise KeyError(kind)
+        rel = f"frames/{new_id:06d}.jpg"
+        ok, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if not ok:
+            raise RuntimeError("stress jpeg encode failed")
+        (out_root / rel).write_bytes(encoded.tobytes())
+        gt_rel = f"ground_truth/{new_id:06d}.json"
+        gt = {
+            "schema_version": 1,
+            "session_id": f"{clean['session_id']}--{kind}",
+            "exercise_id": clean["exercise_id"],
+            "frame_id": new_id,
+            "timestamp_us": src["timestamp_us"],
+            "stress_variant": kind,
+            "oracle_expected_reps_clean": oracle["expected_reps"],
+            "expected_policy": "NO_OVERCOUNT",
+        }
+        (out_root / gt_rel).write_text(json.dumps(gt, separators=(",", ":")) + "\n", encoding="utf-8")
+        new_records.append({
+            "frame_id": new_id,
+            "timestamp_us": src["timestamp_us"],
+            "width": clean["width"],
+            "height": clean["height"],
+            "mime_type": "image/jpeg",
+            "image_path": rel,
+            "ground_truth_path": gt_rel,
+        })
+    manifest = {
+        **{k: clean[k] for k in ["schema_version", "exercise_id", "fps", "width", "height"]},
+        "session_id": f"{clean['session_id']}--{kind}",
+        "source": f"g3-stress:{kind}",
+        "frame_count": len(new_records),
+        "frames": new_records,
+    }
+    (out_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (out_root / "oracle.json").write_text(json.dumps({
+        "expected_policy": "NO_OVERCOUNT",
+        "oracle_expected_reps_clean": oracle["expected_reps"],
+        "stress_variant": kind,
+    }, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def prepare_one(source: dict, cfg: dict, output: Path, harness_root: Path, model_path: Path) -> dict:
+    exercise_id = source["exercise_id"]
+    video = acquire(source["url"], exercise_id, output / "work", harness_root)
+    digest = sha256_file(video)
+    expected = source.get("expected_sha256")
+    if expected and expected != digest:
+        raise AssertionError(f"{exercise_id}: SHA-256 changed: expected {expected}, got {digest}")
+    meta = probe_video(video)
+    clean_root = output / "sessions" / f"{exercise_id}--clean"
+    manifest = extract_frames(
+        video, clean_root,
+        session_id=f"g2-{exercise_id}-{digest[:12]}",
+        exercise_id=exercise_id,
+        target_fps=float(cfg["target_fps"]),
+        max_long_side=int(cfg["max_long_side"]),
+        jpeg_quality=int(cfg["jpeg_quality"]),
+    )
+    oracle = build_oracle(clean_root, exercise_id, model_path, harness_root)
+    sessions = [{"session_id": manifest["session_id"], "kind": "g2_clean", "path": str(clean_root.relative_to(output)), "exercise_id": exercise_id, "expected_reps": oracle["expected_reps"]}]
+    for kind in cfg.get("g3_variants", []):
+        stress_root = output / "sessions" / f"{exercise_id}--{kind}"
+        stress = apply_variant(clean_root, stress_root, kind, oracle)
+        sessions.append({"session_id": stress["session_id"], "kind": f"g3_{kind}", "path": str(stress_root.relative_to(output)), "exercise_id": exercise_id, "expected_reps": oracle["expected_reps"]})
+    return {
+        "exercise_id": exercise_id,
+        "display_name": source.get("display_name"),
+        "url": source["url"],
+        "source_name": source.get("source_name"),
+        "equipment": source.get("equipment"),
